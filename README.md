@@ -1,4 +1,4 @@
-# olipi-core
+# OliPi Core
 OliPi Core is the base for creating user interface writen in Python3 for i2c/SPI - OLED/LCD screens with control via IR remote and/or GPIO buttons.
 
 Comming Soon ;)
