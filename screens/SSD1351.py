@@ -12,13 +12,16 @@ from pathlib import Path
 from ..core_config import get_config
 
 # --- SPI pins ---
-cs_pin_name = get_config("screen", "cs_pin", fallback="CE0", type=str).upper()
-dc_pin_name = get_config("screen", "dc_pin", fallback="D23", type=str).upper()
-reset_pin_name = get_config("screen", "reset_pin", fallback="D24", type=str).upper()
+cs_gpio = get_config("screen", "cs_pin", fallback="8", type=int)
+dc_gpio = get_config("screen", "dc_pin", fallback="23", type=int)
+reset_gpio = get_config("screen", "reset_pin", fallback="24", type=int)
 
-CS_PIN = digitalio.DigitalInOut(getattr(board, cs_pin_name))
-DC_PIN = digitalio.DigitalInOut(getattr(board, dc_pin_name))
-RESET_PIN = digitalio.DigitalInOut(getattr(board, reset_pin_name))
+def gpio_to_board_pin(gpio: int):
+    return getattr(board, f"D{gpio}")
+
+CS_PIN = digitalio.DigitalInOut(gpio_to_board_pin(cs_gpio))
+DC_PIN = digitalio.DigitalInOut(gpio_to_board_pin(dc_gpio))
+RESET_PIN = digitalio.DigitalInOut(gpio_to_board_pin(reset_gpio))
 
 BAUDRATE = get_config("screen", "baudrate", fallback=14000000, type=int)
 ROTATION = get_config("screen", "rotation", fallback=0, type=int)
