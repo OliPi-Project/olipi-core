@@ -194,6 +194,7 @@ def start_inputs(config, process_press, msg_hook=None):
     # GPIO boutons
     if config.getboolean("manual", "use_gpio", fallback=False):
         if GPIO is None:
+            print("error: gpio missing")
             if show_message:
                 show_message("error: gpio missing")
         elif config.has_section("buttons"):
