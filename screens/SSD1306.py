@@ -2,51 +2,47 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright 2025 OliPi Project (Benoit Toufflet)
 
-# screens/ssd1306.py
+# screens/SSD1306.py
 
-from board import SCL, SDA
-import busio
-import adafruit_ssd1306
 from PIL import Image, ImageDraw, ImageFont
-from pathlib import Path
+from ..core_config import get_config
+from luma.core.interface.serial import i2c
+from luma.oled.device import ssd1306, SSD1309
 
-# --- I2C pins ---
-i2c = busio.I2C(SCL, SDA)
+# --- I2C serial interface ---
+SERIAL = i2c(port=1, address=0x3C)
+disp = ssd1306(SERIAL)
 
-# --- Display init ---
-disp = adafruit_ssd1306.SSD1306_I2C(128, 64, i2c)
-
-# Dimensions
-width, height = disp.width, disp.height
-diag_inch = 0.96
-
-# --- Image / Draw ---
-image = Image.new("1", (width, height))
-draw = ImageDraw.Draw(image)
-Image = Image
-
+# --- Exposed attributes for core_common ---
+width = disp.width
+height = disp.height
+DIAG_INCH = 0.96
 DISPLAY_FORMAT = "MONO"
 
-# --- Fonts core_common ---
-font_title_menu = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 10)
-font_item_menu = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", 11)
-font_message = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", 11)
+# --- Logical drawing surface ---
+image = Image.new("1", (width, height))  # mode "1" = monochrome
+draw = ImageDraw.Draw(image)
 
+# --- Rotation (ignore, fixed 128x64) ---
+ROTATION = 0
+
+# ---- Display functions ----
 def refresh(img=None):
-    """Display the current buffer or a provided image."""
-    disp.image(img if img else image)
-    disp.show()
+    """Send current buffer (PIL Image) to OLED."""
+    img_to_send = img if img else image
+    disp.display(img_to_send)
 
 def clear_display():
-    """Clear the physical display (ignore buffer)."""
-    disp.fill(0)
-    disp.show()
+    """Clear buffer and physical display."""
+    draw.rectangle((0, 0, width, height), fill=0)
+    refresh()
 
 def poweroff_safe():
+    """Best-effort power off."""
     if hasattr(disp, "poweroff"):
         disp.poweroff()
 
 def poweron_safe():
+    """Best-effort power on."""
     if hasattr(disp, "poweron"):
         disp.poweron()
-

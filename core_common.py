@@ -26,20 +26,20 @@ SCREEN_TYPE = get_config("screen", "current_screen", fallback="SSD1306", type=st
 screen = import_module(f"olipi_core.screens.{SCREEN_TYPE}")
 
 # --- Wrappers / Shortcuts ---
-disp = screen.disp
+#disp = screen.disp
 image = screen.image
 draw = screen.draw
 Image = screen.Image
 width  = screen.width
 height = screen.height
-diag_inch = screen.diag_inch
+diag_inch = screen.DIAG_INCH
 
 refresh = screen.refresh
 clear_display = screen.clear_display
 poweroff_safe = screen.poweroff_safe
 poweron_safe = screen.poweron_safe
 
-display_format = getattr(screen, "DISPLAY_FORMAT", "RGB")
+display_format = getattr(screen, "DISPLAY_FORMAT", "MONO")
 
 clear_display()
 
