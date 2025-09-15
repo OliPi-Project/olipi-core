@@ -31,14 +31,15 @@ def get_config(section, key, fallback=None, type=str):
         return fallback
 
 def save_config(key, value, section="settings", preserve_case=False):
-    """Write a value while preserving comments, section structure, and proper spacing."""
+    """Write a value while preserving comments, structure, and spacing."""
     key = key.strip()
     value = str(value).strip()
     if not preserve_case:
         value = value.lower()
 
-    section_lower = section.lower()
+    section = section.lower()
     if not CONFIG_PATH.exists():
+        # file doesn't exist → create with the section and key/value
         CONFIG_PATH.write_text(f"[{section}]\n{key} = {value}\n", encoding="utf-8")
         config.read(CONFIG_PATH)
         return
@@ -48,47 +49,54 @@ def save_config(key, value, section="settings", preserve_case=False):
     in_section = False
     key_written = False
     section_found = False
-    last_nonempty_idx = None  # index of last non-empty line in section
 
-    for i, line in enumerate(lines):
+    for idx, line in enumerate(lines):
         stripped = line.strip()
 
+        # detect section header
         if stripped.startswith("[") and stripped.endswith("]"):
-            # If we leave a section and key wasn't written yet
+            # if leaving previous section and key not yet written → insert it
             if in_section and not key_written:
-                insert_idx = last_nonempty_idx + 1 if last_nonempty_idx is not None else len(new_lines)
-                new_lines.insert(insert_idx, f"{key} = {value}")
+                # insert after last non-empty line in the section
+                insert_idx = len(new_lines) - 1
+                while insert_idx >= 0 and new_lines[insert_idx].strip() == "":
+                    insert_idx -= 1
+                new_lines.insert(insert_idx + 1, f"{key} = {value}")
                 key_written = True
 
             current_section = stripped[1:-1].lower()
-            in_section = (current_section == section_lower)
+            in_section = (current_section == section)
             if in_section:
                 section_found = True
-                last_nonempty_idx = None
+
             new_lines.append(line)
             continue
 
         if in_section:
-            if stripped != "":
-                last_nonempty_idx = len(new_lines)
+            # update existing key if found
             if (stripped.startswith(f"{key}=") or stripped.startswith(f"{key} =")) and not key_written:
-                new_lines[last_nonempty_idx] = f"{key} = {value}"
+                new_lines.append(f"{key} = {value}")
                 key_written = True
                 continue
 
         new_lines.append(line)
 
-    # If we were still in section at EOF and key not written
+    # if we ended inside section and key not yet written → insert at end
     if in_section and not key_written:
-        insert_idx = last_nonempty_idx + 1 if last_nonempty_idx is not None else len(new_lines)
-        new_lines.insert(insert_idx, f"{key} = {value}")
+        insert_idx = len(new_lines) - 1
+        while insert_idx >= 0 and new_lines[insert_idx].strip() == "":
+            insert_idx -= 1
+        new_lines.insert(insert_idx + 1, f"{key} = {value}")
         key_written = True
 
-    # Section completely missing
+    # if section never existed → append at the end
     if not section_found:
-        new_lines.append(f"\n[{section}]")
+        if new_lines and new_lines[-1].strip() != "":
+            new_lines.append("")  # ensure separation from previous content
+        new_lines.append(f"[{section}]")
         new_lines.append(f"{key} = {value}")
 
+    # write back to file
     CONFIG_PATH.write_text("\n".join(new_lines) + "\n", encoding="utf-8")
     config.read(CONFIG_PATH)
 
