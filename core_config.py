@@ -31,7 +31,11 @@ def get_config(section, key, fallback=None, type=str):
         return fallback
 
 def save_config(key, value, section="settings", preserve_case=False):
-    """Write a value while preserving comments and structure."""
+    """Write a value while preserving comments and structure.
+    - If key exists → replace it.
+    - If missing → add just after the last line of the section.
+    - Ensure there is a blank line before the next [section].
+    """
     key = key.strip()
     value = str(value).strip()
     if not preserve_case:
@@ -39,7 +43,7 @@ def save_config(key, value, section="settings", preserve_case=False):
 
     section = section.lower()
     if not CONFIG_PATH.exists():
-        CONFIG_PATH.write_text(f"[{section}]\n{key} = {value}\n", encoding="utf-8")
+        CONFIG_PATH.write_text(f"[{section}]\n{key} = {value}\n\n", encoding="utf-8")
         config.read(CONFIG_PATH)
         return
 
@@ -49,29 +53,39 @@ def save_config(key, value, section="settings", preserve_case=False):
     key_written = False
     section_found = False
 
-    for line in lines:
+    for i, line in enumerate(lines):
         stripped = line.strip()
         if stripped.startswith("[") and stripped.endswith("]"):
-            current_section = stripped[1:-1].lower()
+            # New section begins
             if in_section and not key_written:
+                # Insert key just before leaving the section
                 new_lines.append(f"{key} = {value}")
                 key_written = True
+                # Ensure a blank line before the next section header
+                if new_lines and new_lines[-1].strip() != "":
+                    new_lines.append("")
+            current_section = stripped[1:-1].lower()
             in_section = (current_section == section)
             if in_section:
                 section_found = True
             new_lines.append(line)
             continue
+
         if in_section:
+            # Replace existing key
             if (stripped.startswith(f"{key}=") or stripped.startswith(f"{key} =")) and not key_written:
                 new_lines.append(f"{key} = {value}")
                 key_written = True
                 continue
         new_lines.append(line)
 
+    # End of file
     if in_section and not key_written:
         new_lines.append(f"{key} = {value}")
     if not section_found:
-        new_lines.append(f"\n[{section}]")
+        if new_lines and new_lines[-1].strip():
+            new_lines.append("")
+        new_lines.append(f"[{section}]")
         new_lines.append(f"{key} = {value}")
 
     CONFIG_PATH.write_text("\n".join(new_lines) + "\n", encoding="utf-8")
