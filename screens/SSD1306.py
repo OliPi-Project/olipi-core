@@ -7,7 +7,7 @@
 from PIL import Image, ImageDraw, ImageFont
 from ..core_config import get_config
 from luma.core.interface.serial import i2c
-from luma.oled.device import ssd1306, SSD1309
+from luma.oled.device import ssd1306, ssd1309
 
 # --- I2C serial interface ---
 SERIAL = i2c(port=1, address=0x3C)
