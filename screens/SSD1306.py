@@ -10,7 +10,8 @@ from luma.core.interface.serial import i2c
 from luma.oled.device import ssd1306, ssd1309
 
 # --- I2C serial interface ---
-SERIAL = i2c(port=1, address=0x3C)
+I2C_ADRESS = get_config("screen", "i2c_address", fallback="0x3C", type=str)
+SERIAL = i2c(port=1, address=I2C_ADRESS)
 disp = ssd1306(SERIAL)
 
 # --- Exposed attributes for core_common ---
