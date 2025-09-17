@@ -25,9 +25,8 @@ OliPi Core is the base for creating Python3 user interface to display on i2c/SPI
 - **Python dependencies**:
   
   ```txt
-  Adafruit_Blinka~=8.55.0
-  adafruit_circuitpython_ssd1306~=2.12.21
-  adafruit_circuitpython_rgb_display~=3.14.1
+  luma.oled~=3.14.0
+  luma_core~=2.5.1
   Pillow~=11.3.0
   PyYAML~=6.0.2
   rpi_lgpio~=0.6
