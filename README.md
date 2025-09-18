@@ -11,20 +11,20 @@ OliPi Core is the base for creating Python3 user interface to display on i2c/SPI
 - **Hardware**: 
   
       - Raspberry Pi (Zero 2W, 3, 4, 5) 
-      - TFT/LCD. 
+      - I2C/SPI Screen. 
       - IR receiver type TSOP38 or similar (if used)
       - Push Button and/or Rotary Encoder (if used)
 
 - **APT dependencies**:
   
-  ```bash
+  ```
   python3-pil python3-venv python3-pip python3-tk
   i2c-tools libgpiod-dev python3-libgpiod python3-lgpio python3-setuptools
   ```
 
 - **Python dependencies**:
   
-  ```txt
+  ```
   luma.oled~=3.14.0
   luma_core~=2.5.1
   Pillow~=11.3.0
@@ -32,11 +32,9 @@ OliPi Core is the base for creating Python3 user interface to display on i2c/SPI
   rpi_lgpio~=0.6
   ```
 
----
 
-## More Documentation to come ...
+### More Documentation to come ...
 
----
 
 ## 📄 License
 
