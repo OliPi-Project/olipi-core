@@ -1,8 +1,20 @@
+![License](https://img.shields.io/github/license/OliPi-Project/olipi-moode)
+![Python](https://img.shields.io/badge/python-3.9+-blue)
+![Platform](https://img.shields.io/badge/platform-Raspberry%20Pi-red)
+![Discord](https://img.shields.io/discord/1410910825870266391?logo=discord&logoColor=white&logoSize=auto&label=Discord&color=blue&link=https%3A%2F%2Fdiscord.gg%2Fpku67XsFEE)
+![GitHub Release](https://img.shields.io/github/v/release/OliPi-Project/olipi-core?include_prereleases&sort=date&display_name=tag)
+
 # OliPi Core
 
 OliPi Core is the base for creating Python3 user interface to display on i2c/SPI screens with control via IR remote and/or GPIO buttons.
 
 ---
+
+## ❔ What's new?
+
+**<u>V0.2.0-pre</u>**
+
+*Change of approach for SPI displays: they now use the FBTFT overlay directly instead of going through the Adafruit lib. For I2C screens, I've switched to Luma.oled.*
 
 ## 📦 System requirements
 
@@ -43,7 +55,7 @@ License and attribution
 This project is licensed under the GNU General Public License v3.0 (GPLv3).  
 See the [LICENSE](./LICENSE) file for details.
 
-## **Disclaimer**
+## ⚠️ **Disclaimer**
 
 The software and other items in this repository are distributed under the [GNU General Public License Version 3](https://github.com/Trachou2Bois/olipi-moode/blob/main/LICENSE), which includes the following disclaimer:
 
