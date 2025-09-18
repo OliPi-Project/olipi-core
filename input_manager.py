@@ -188,11 +188,11 @@ def start_inputs(config, process_press, msg_hook=None):
         print("No valid remote mappings found, using raw keys")
 
     # LIRC
-    if config.getboolean("manual", "use_lirc", fallback=True):
+    if config.getboolean("lirc", "use_lirc", fallback=True):
         threading.Thread(target=lirc_listener, args=(process_key, config), daemon=True).start()
 
     # GPIO boutons
-    if config.getboolean("manual", "use_gpio", fallback=False):
+    if config.getboolean("buttons", "use_gpio", fallback=False):
         if GPIO is None:
             print("error: gpio missing")
             if show_message:
@@ -214,7 +214,7 @@ def start_inputs(config, process_press, msg_hook=None):
                     print("error gpio pin:", e)
 
     # Rotary encoder + bouton rotary
-    if config.getboolean("manual", "use_rotary", fallback=False) and config.has_section("rotary") and GPIO:
+    if config.getboolean("rotary", "use_rotary", fallback=False) and config.has_section("rotary") and GPIO:
         try:
             pin_a = config.getint("rotary", "pin_a")
             pin_b = config.getint("rotary", "pin_b")
