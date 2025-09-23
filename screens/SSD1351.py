@@ -20,7 +20,6 @@ def get_oled_fb():
     return None
 
 FB_DEVICE = get_oled_fb()
-FB_ENDIAN = "little"  # 'little' or 'big' or 'native'
 
 # --- Overlay framebuffer size (from fbtft overlay) ---
 FB_WIDTH = 128
@@ -58,14 +57,9 @@ def _rgb_to_rgb565_bytes_numpy(img):
     b = (arr[:, :, 2] >> 3).astype(_np.uint16)
     color = (r << 8) | (g << 3) | b
 
-    if FB_ENDIAN == "big":
-        hi = (color >> 8) & 0xFF
-        lo = color & 0xFF
-        packed = _np.dstack((hi, lo)).astype(_np.uint8)
-    else:
-        lo = color & 0xFF
-        hi = (color >> 8) & 0xFF
-        packed = _np.dstack((lo, hi)).astype(_np.uint8)
+    lo = color & 0xFF
+    hi = (color >> 8) & 0xFF
+    packed = _np.dstack((lo, hi)).astype(_np.uint8)
     return packed.flatten().tobytes()
 
 def pil_to_fb_bytes(img):
