@@ -159,9 +159,9 @@ def rotary_listener(pin_a, pin_b, process_key):
         if last_state != state:
             if last_state == (0, 0):
                 if state == (0, 1):
-                    process_key("KEY_VOLUMEUP", "00")
+                    process_key("KEY_UP", "00")
                 elif state == (1, 0):
-                    process_key("KEY_VOLUMEDOWN", "00")
+                    process_key("KEY_DOWN", "00")
             last_state = state
         time.sleep(0.01)
 
@@ -188,12 +188,13 @@ def start_inputs(config, process_press, msg_hook=None):
         print("No valid remote mappings found, using raw keys")
 
     # LIRC
-    if config.getboolean("manual", "use_lirc", fallback=True):
+    if config.getboolean("input", "use_lirc", fallback=True):
         threading.Thread(target=lirc_listener, args=(process_key, config), daemon=True).start()
 
     # GPIO boutons
-    if config.getboolean("manual", "use_gpio", fallback=False):
+    if config.getboolean("input", "use_buttons", fallback=False):
         if GPIO is None:
+            print("error: gpio missing")
             if show_message:
                 show_message("error: gpio missing")
         elif config.has_section("buttons"):
@@ -213,7 +214,7 @@ def start_inputs(config, process_press, msg_hook=None):
                     print("error gpio pin:", e)
 
     # Rotary encoder + bouton rotary
-    if config.getboolean("manual", "use_rotary", fallback=False) and config.has_section("rotary") and GPIO:
+    if config.getboolean("input", "use_rotary", fallback=False) and config.has_section("rotary") and GPIO:
         try:
             pin_a = config.getint("rotary", "pin_a")
             pin_b = config.getint("rotary", "pin_b")
