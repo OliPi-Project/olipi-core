@@ -39,11 +39,15 @@ def clear_display():
     refresh()
 
 def poweroff_safe():
-    """Best-effort power off."""
-    if hasattr(disp, "poweroff"):
-        disp.poweroff()
+    """Turn off OLED display (luma.oled)."""
+    try:
+        disp.command(0xAE)  # DISPLAYOFF
+    except Exception as e:
+        print(f"Safe poweroff failed: {e}")
 
 def poweron_safe():
-    """Best-effort power on."""
-    if hasattr(disp, "poweron"):
-        disp.poweron()
+    """Turn on OLED display (luma.oled)."""
+    try:
+        disp.command(0xAF)  # DISPLAYON
+    except Exception as e:
+        print(f"Safe poweron failed: {e}")
