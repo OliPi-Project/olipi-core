@@ -7,19 +7,24 @@
 # Requires numpy, handles resolution + rotation.
 
 import os
+import subprocess
 from pathlib import Path
 from PIL import Image, ImageDraw, ImageFont
 from ..core_config import get_config
 import numpy as _np
 
+FB_NAME = "fb_st7789v"
+
 def get_oled_fb():
     for fb in os.listdir("/sys/class/graphics"):
         with open(f"/sys/class/graphics/{fb}/name") as f:
-            if f.read().strip() == "fb_st7789v":
+            if f.read().strip() == FB_NAME:
                 return f"/dev/{fb}"
     return None
 
 FB_DEVICE = get_oled_fb()
+
+BACKLIGHT_PATH = f"/sys/class/backlight/{FB_NAME}/bl_power"
 
 # --- Overlay framebuffer size (from fbtft overlay) ---
 FB_WIDTH = 240
@@ -105,7 +110,23 @@ def clear_display():
     refresh()
 
 def poweroff_safe():
+    if os.path.exists(BACKLIGHT_PATH):
+        try:
+            subprocess.run(
+                ["sudo", "tee", BACKLIGHT_PATH],
+                input=b"1\n", check=True, capture_output=True
+            )
+        except subprocess.CalledProcessError as e:
+            print(f"Backlight OFF failed for {FB_NAME}: {e.stderr.decode().strip()}")
     clear_display()
 
 def poweron_safe():
+    if os.path.exists(BACKLIGHT_PATH):
+        try:
+            subprocess.run(
+                ["sudo", "tee", BACKLIGHT_PATH],
+                input=b"0\n", check=True, capture_output=True
+            )
+        except subprocess.CalledProcessError as e:
+            print(f"Backlight ON failed for {FB_NAME}: {e.stderr.decode().strip()}")
     refresh()
