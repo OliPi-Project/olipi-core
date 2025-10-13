@@ -10,14 +10,14 @@ from PIL import Image, ImageDraw, ImageFont
 from ..core_config import get_config
 import numpy as _np
 
-def get_oled_fb():
+def get_fb():
     for fb in os.listdir("/sys/class/graphics"):
         with open(f"/sys/class/graphics/{fb}/name") as f:
             if f.read().strip() == "fb_ssd1351":
                 return f"/dev/{fb}"
     return None
 
-FB_DEVICE = get_oled_fb()
+FB_DEVICE = get_fb()
 
 # --- Overlay framebuffer size (from fbtft overlay) ---
 FB_WIDTH = 128
