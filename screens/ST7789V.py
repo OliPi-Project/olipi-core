@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: GPL-3.0-or-later
-# Copyright 2025 OliPi Project (Benoit Toufflet)
+# Copyright 2025 OliPi Project
 
 # screens/ST7789V.py
 
 import os
 import subprocess
 from pathlib import Path
-from PIL import Image, ImageDraw, ImageFont
+from PIL import Image, ImageDraw, ImageFont, ImageOps
 from ..core_config import get_config
 import numpy as _np
 
@@ -21,10 +21,9 @@ def get_fb():
     return None
 
 FB_DEVICE = get_fb()
-
 BACKLIGHT_PATH = f"/sys/class/backlight/{FB_NAME}/bl_power"
 
-# --- Overlay framebuffer size (from fbtft overlay) ---
+# --- Overlay framebuffer size ---
 FB_WIDTH = 240
 FB_HEIGHT = 320
 
@@ -32,9 +31,10 @@ FB_HEIGHT = 320
 PHYSICAL_WIDTH = 240
 PHYSICAL_HEIGHT = 320
 
-ROTATION = get_config("screen", "rotation", fallback=90, type=int)  # must be one of (0,90,180,270)
+ROTATION = get_config("screen", "rotation", fallback=90, type=int)
 DISPLAY_FORMAT = get_config("screen", "display_format", fallback="RGB", type=str)
-DIAG_INCH = 2.0
+INVERT = get_config("screen", "invert", fallback=False, type=bool)
+DIAG_INCH = get_config("screen", "diag", fallback=2.0, type=float)
 
 # Validate rotation
 if ROTATION not in (0, 90, 180, 270):
@@ -98,6 +98,7 @@ def refresh(img: Image.Image = None):
     """
     Optimized partial refresh for small TFT:
      - rotate the logical image first (so rotation is preserved)
+     - optionally invert colors if requested via config
      - scale down if necessary
      - convert only the rotated logical image to RGB565 (into reuse buffer)
      - write blocks of rows into /dev/fbN using os.lseek + os.write
@@ -107,6 +108,14 @@ def refresh(img: Image.Image = None):
     # apply rotation first so offsets/size reflect rotated image
     if ROTATION != 0:
         buf_img = buf_img.rotate(ROTATION, expand=True)
+
+    # Optional inversion: flip colors if INVERT is True
+    if INVERT:
+        try:
+            # ensure RGB for invert; convert back to RGB below for conversion function
+            buf_img = ImageOps.invert(buf_img.convert("RGB"))
+        except Exception as e:
+            print("ST7789V color invert error:", e)
 
     w, h = buf_img.size
 
@@ -123,6 +132,9 @@ def refresh(img: Image.Image = None):
     y_off = (FB_HEIGHT - h) // 2
 
     # convert logical region to rgb565 into shared buffer
+    # ensure image is RGB for the converter (ImageOps.invert already returned RGB)
+    if buf_img.mode != "RGB":
+        buf_img = buf_img.convert("RGB")
     rgb565_mv = _convert_image_to_rgb565_into_buf(buf_img)  # memoryview on bytes
 
     line_bytes = w * 2
@@ -184,4 +196,3 @@ def poweron_safe():
         except subprocess.CalledProcessError as e:
             print(f"Backlight ON failed for {FB_NAME}: {e.stderr.decode().strip()}")
     refresh()
-    

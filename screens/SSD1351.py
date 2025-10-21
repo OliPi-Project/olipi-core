@@ -5,8 +5,9 @@
 # screens/SSD1351.py
 
 import os
+import subprocess
 from pathlib import Path
-from PIL import Image, ImageDraw, ImageFont
+from PIL import Image, ImageDraw, ImageFont, ImageOps
 from ..core_config import get_config
 import numpy as _np
 
@@ -29,13 +30,15 @@ PHYSICAL_HEIGHT = 128
 
 ROTATION = get_config("screen", "rotation", fallback=0, type=int)  # must be (0,90,180,270)
 DISPLAY_FORMAT = get_config("screen", "display_format", fallback="BGR", type=str)
-DIAG_INCH = 1.5
+INVERT = get_config("screen", "invert", fallback=False, type=bool)
+DIAG_INCH = get_config("screen", "diag", fallback=1.5, type=float)
 
 # Validate rotation
 if ROTATION not in (0, 90, 180, 270):
+    # clamp/normalize to nearest valid
     ROTATION = 0
 
-# Logical (drawing) width/height
+# Logical (drawing) width/height as exposed to core_common must reflect rotation
 if ROTATION in (90, 270):
     width = PHYSICAL_HEIGHT
     height = PHYSICAL_WIDTH
@@ -43,7 +46,7 @@ else:
     width = PHYSICAL_WIDTH
     height = PHYSICAL_HEIGHT
 
-# Create in-memory PIL image + draw handle
+# Create an in-memory PIL image and a draw handle (these are the logical drawing surface)
 image = Image.new("RGB", (width, height))
 draw = ImageDraw.Draw(image)
 
@@ -92,6 +95,7 @@ def refresh(img: Image.Image = None):
     """
     Optimized partial refresh for small TFT:
      - rotate the logical image first (so rotation is preserved)
+     - optionally invert colors if requested via config
      - scale down if necessary
      - convert only the rotated logical image to RGB565 (into reuse buffer)
      - write blocks of rows into /dev/fbN using os.lseek + os.write
@@ -101,6 +105,14 @@ def refresh(img: Image.Image = None):
     # apply rotation first so offsets/size reflect rotated image
     if ROTATION != 0:
         buf_img = buf_img.rotate(ROTATION, expand=True)
+
+    # Optional inversion: flip colors if INVERT is True
+    if INVERT:
+        try:
+            # ensure RGB for invert; convert back to RGB below for conversion function
+            buf_img = ImageOps.invert(buf_img.convert("RGB"))
+        except Exception as e:
+            print("ST7789V color invert error:", e)
 
     w, h = buf_img.size
 
@@ -117,6 +129,9 @@ def refresh(img: Image.Image = None):
     y_off = (FB_HEIGHT - h) // 2
 
     # convert logical region to rgb565 into shared buffer
+    # ensure image is RGB for the converter (ImageOps.invert already returned RGB)
+    if buf_img.mode != "RGB":
+        buf_img = buf_img.convert("RGB")
     rgb565_mv = _convert_image_to_rgb565_into_buf(buf_img)  # memoryview on bytes
 
     line_bytes = w * 2
