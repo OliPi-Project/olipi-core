@@ -17,7 +17,14 @@ except ImportError:
 # === Constants ===
 DEBOUNCE_DELAY = 0.15
 BOUNCETIME_DELAY = 0.05
-REPEAT_INTERVAL = 0.08
+REPEAT_INTERVAL = 0.1
+
+repeat_threads = {}
+repeat_counts = {}
+
+remote_mapping = {}
+
+debug = False
 
 # === Shared data ===
 debounce_data = {}
@@ -26,39 +33,47 @@ debounce_data = {}
 show_message = None
 press_callback = None
 
-# === Repeat threads tracking ===
-repeat_threads = {}
-repeat_counts = {}
-
-# === Remote mapping ===
-remote_mapping = {}
-
-debug = False
-
 # --- Common repeat sender for GPIO and rotary button ---
-def repeat_sender(key, channel):
-    while key in repeat_counts:
-        time.sleep(REPEAT_INTERVAL)
-        if GPIO.input(channel) == GPIO.LOW:
-            repeat_counts[key] += 1
-            code = f"{repeat_counts[key]:02x}"
-            process_key(key, code)
-        else:
-            break
-    repeat_counts.pop(key, None)
-    repeat_threads.pop(key, None)
+def repeat_sender(key: str, check_fn):
+    """
+    Generic repeat sender.
+    - key: logical key name (e.g. "KEY_UP")
+    - check_fn: callable returning True while "pressed"
+    - REPEAT_INTERVAL: seconds between repeats
+    """
+    try:
+        while key in repeat_counts:
+            time.sleep(REPEAT_INTERVAL)
+            # ask the provided check function if input is still active
+            if check_fn():
+                repeat_counts[key] += 1
+                repeat_code = f"{repeat_counts[key]:02x}"
+                process_key(key, repeat_code)
+            else:
+                break
+    finally:
+        # cleanup even on exceptions
+        repeat_counts.pop(key, None)
+        repeat_threads.pop(key, None)
 
 
 # --- GPIO button event callback ---
-def gpio_event(channel, key):
-    if GPIO.input(channel) == GPIO.LOW:
+def gpio_event(button_pressed, key):
+    """
+    GPIO callback: start a repeat thread that polls GPIO.input(button_pressed).
+    Existing semantics preserved: first press -> process_key(...,"00")
+    """
+    if GPIO.input(button_pressed) == GPIO.LOW:
         if key not in repeat_threads:
             repeat_counts[key] = 0
-            process_key(key, "00")  # premier appui
-            t = threading.Thread(target=repeat_sender, args=(key, channel), daemon=True)
+            process_key(key, "00")  # first press
+            # pass a check_fn that reads the GPIO pin
+            check_fn = lambda bp=button_pressed: GPIO.input(bp) == GPIO.LOW
+            t = threading.Thread(target=repeat_sender, args=(key, check_fn), daemon=True)
             repeat_threads[key] = t
             t.start()
     else:
+        # release: ensure we stop any repeat
         repeat_counts.pop(key, None)
         repeat_threads.pop(key, None)
 
@@ -103,8 +118,6 @@ def process_key(key, repeat_code):
     debounce_data[mapped_key]["timer"] = t
     t.start()
 
-
-# === LIRC listener ===
 def lirc_listener(process_key, config):
     try:
         proc = subprocess.Popen(
@@ -133,6 +146,83 @@ def lirc_listener(process_key, config):
             show_message(f"error lirc listener: {e}")
         print("error lirc listener:", e)
 
+def mpr121_listener(process_key, config):
+    from .olipicap.mpr121 import MPR121
+
+    address = int(config.get("mpr121", "i2c_address", fallback="0x5A"),0)
+    int_pin = config.getint("mpr121", "int_pin", fallback=None)
+    touch_threshold = config.getint("mpr121", "touch_threshold", fallback=20)
+    release_threshold = config.getint("mpr121", "release_threshold", fallback=15)
+
+    PAD_KEY_MAPPING = {
+        0: "KEY_UP",
+        1: "KEY_DOWN",
+        2: "KEY_LEFT",
+        3: "KEY_RIGHT",
+        4: "KEY_OK",
+        5: "KEY_BACK",
+        6: "KEY_CHANNELUP",
+        7: "KEY_CHANNELDOWN",
+        8: "KEY_PLAY",
+        9: "KEY_INFO",
+        10: "KEY_11",
+        11: "KEY_12",
+        12: "KEY_13_PROX",
+    }
+
+    sensor = MPR121(address)
+    if not sensor.begin():
+        if debug:
+            print("error: MPR121 initialization failed")
+        if show_message:
+            show_message("error: MPR121 init failed")
+        return
+
+    sensor.set_touch_threshold(touch_threshold)
+    sensor.set_release_threshold(release_threshold)
+    sensor.set_interrupt_pin(int_pin)
+
+    print(f"[mpr121_listener] started @0x{address:02X} touch={touch_threshold} release={release_threshold}")
+
+    running = True
+
+    while running:
+        try:
+            if sensor.touch_status_changed():
+                sensor.update_touch_data()
+                # iterate through pads 0..11 (touch electrodes)
+                for i in range(12):
+                    key = PAD_KEY_MAPPING.get(i, f"PAD{i}")
+                    # NEW TOUCH: start repeat thread (if not already running)
+                    if sensor.is_new_touch(i):
+                        if debug:
+                            print(f"electrode {i} was just touched => {key}")
+                        if key not in repeat_threads:
+                            # initialize repeat counter and emit first press ("00")
+                            repeat_counts[key] = 0
+                            process_key(key, "00")
+
+                            # check_fn for this pad: poll sensor.get_touch_data(i)
+                            check_fn = (lambda s=sensor, idx=i: s.get_touch_data(idx))
+                            t = threading.Thread(target=repeat_sender, args=(key, check_fn), daemon=True)
+                            repeat_threads[key] = t
+                            t.start()
+                    # RELEASE: stop repeat thread by removing entries
+                    elif sensor.is_new_release(i):
+                        if debug:
+                            print(f"electrode {i} was just released => {key}")
+                        repeat_counts.pop(key, None)
+                        repeat_threads.pop(key, None)
+
+            time.sleep(0.01)
+        except KeyboardInterrupt:
+            running = False
+        except Exception as e:
+            print("error mpr121 listener:", e)
+            if show_message:
+                show_message("error mpr121 listener")
+            time.sleep(0.1)
+
 def rotary_listener(pin_a, pin_b, process_key, config=None):
     divider = 2
     invert = False
@@ -140,7 +230,7 @@ def rotary_listener(pin_a, pin_b, process_key, config=None):
 
     if config is not None:
         try:
-            divider = int(config.get("rotary", "rotary_divider", fallback=divider))
+            divider = config.getint("rotary", "rotary_divider", fallback=divider)
         except Exception:
             pass
         try:
@@ -148,7 +238,7 @@ def rotary_listener(pin_a, pin_b, process_key, config=None):
         except Exception:
             pass
         try:
-            min_poll_ms = float(config.get("rotary", "rotary_min_poll_ms", fallback=min_poll_ms))
+            min_poll_ms = config.getfloat("rotary", "rotary_min_poll_ms", fallback=min_poll_ms)
         except Exception:
             pass
 
@@ -163,7 +253,9 @@ def rotary_listener(pin_a, pin_b, process_key, config=None):
         a = GPIO.input(pin_a)
         b = GPIO.input(pin_b)
     except Exception as e:
-        print("error rotary read initial:", e)
+        if show_message:
+            show_message(f"error rotary initial read")
+        print("error rotary initial read:", e)
         return
 
     last_val = state_map.get((a, b), 2)
@@ -219,6 +311,8 @@ def rotary_listener(pin_a, pin_b, process_key, config=None):
 
             time.sleep(poll_delay)
         except Exception as e:
+            if show_message:
+                show_message(f"error rotary listener")
             print("error rotary listener:", e)
             time.sleep(0.05)
 
@@ -245,8 +339,12 @@ def start_inputs(config, process_press, msg_hook=None):
         print("No valid remote mappings found, using raw keys")
 
     # LIRC
-    if config.getboolean("input", "use_lirc", fallback=True):
+    if config.getboolean("input", "use_lirc", fallback=False):
         threading.Thread(target=lirc_listener, args=(process_key, config), daemon=True).start()
+
+    # MPR121
+    if config.getboolean("input", "use_mpr121", fallback=False):
+        threading.Thread(target=mpr121_listener, args=(process_key, config), daemon=True).start()
 
     # GPIO boutons
     if config.getboolean("input", "use_buttons", fallback=False):
@@ -262,12 +360,12 @@ def start_inputs(config, process_press, msg_hook=None):
                     GPIO.add_event_detect(
                         pin,
                         GPIO.BOTH,
-                        callback=lambda ch, k=key.upper(): gpio_event(ch, k),
+                        callback=lambda ch, k=key.upper(), p=pin: gpio_event(p, k),
                         bouncetime=int(BOUNCETIME_DELAY * 1000),
                     )
                 except Exception as e:
                     if show_message:
-                        show_message(f"error gpio pin: {e}")
+                        show_message(f"error gpio pin")
                     print("error gpio pin:", e)
 
     # Rotary encoder + bouton rotary
