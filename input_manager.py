@@ -151,52 +151,106 @@ def mpr121_listener(process_key, config):
 
     address = int(config.get("mpr121", "i2c_address", fallback="0x5A"),0)
     int_pin = config.getint("mpr121", "int_pin", fallback=None)
-    touch_threshold = config.getint("mpr121", "touch_threshold", fallback=20)
-    release_threshold = config.getint("mpr121", "release_threshold", fallback=15)
 
-    PAD_KEY_MAPPING = {
-        0: "KEY_UP",
-        1: "KEY_DOWN",
-        2: "KEY_LEFT",
-        3: "KEY_RIGHT",
-        4: "KEY_OK",
-        5: "KEY_BACK",
-        6: "KEY_CHANNELUP",
-        7: "KEY_CHANNELDOWN",
-        8: "KEY_PLAY",
-        9: "KEY_INFO",
-        10: "KEY_11",
-        11: "KEY_12",
-        12: "KEY_13_PROX",
-    }
+    # --- Load pad configuration ---
+    PAD_KEY_MAPPING = {}
+    pad_touch_thresholds = {}
+    pad_release_thresholds = {}
 
+    if config.has_section("mpr121_pads"):
+        for key, value in config.items("mpr121_pads"):
+            if not key.lower().startswith("pad"):
+                continue
+            try:
+                pad_index = int(key[3:])
+                parts = [v.strip() for v in value.split(",")]
+                if len(parts) >= 3:
+                    action = parts[0].upper()
+                    tth = int(parts[1]) if parts[1] not in ["", "-", "none"] else None
+                    rth = int(parts[2]) if parts[2] not in ["", "-", "none"] else None
+                else:
+                    action, tth, rth = parts[0].upper(), None, None
+                PAD_KEY_MAPPING[pad_index] = action
+                pad_touch_thresholds[pad_index] = tth
+                pad_release_thresholds[pad_index] = rth
+            except Exception as e:
+                print(f"error parsing {key}: {e}")
+    else:
+        # fallback default mapping
+        PAD_KEY_MAPPING = {
+            0: "KEY_UP",
+            1: "KEY_DOWN",
+            2: "KEY_LEFT",
+            3: "KEY_RIGHT",
+            4: "KEY_OK",
+            5: "KEY_BACK",
+            6: "KEY_CHANNELUP",
+            7: "KEY_CHANNELDOWN",
+            8: "KEY_PLAY",
+            9: "KEY_INFO",
+            10: "KEY_STOP",
+            11: "KEY_POWER",
+            12: "KEY_PROX",
+        }
+
+    # --- Apply thresholds ---
     sensor = MPR121(address)
     if not sensor.begin():
-        if debug:
-            print("error: MPR121 initialization failed")
         if show_message:
-            show_message("error: MPR121 init failed")
+            show_message("error: MPR121 init failed") if show_message else None
+        print("error: MPR121 init failed")
         return
 
-    sensor.set_touch_threshold(touch_threshold)
-    sensor.set_release_threshold(release_threshold)
     sensor.set_interrupt_pin(int_pin)
 
-    print(f"[mpr121_listener] started @0x{address:02X} touch={touch_threshold} release={release_threshold}")
+    # global defaults
+    global_touch = config.getint("mpr121", "touch_threshold", fallback=20)
+    global_release = config.getint("mpr121", "release_threshold", fallback=15)
+    sensor.set_touch_threshold(global_touch)
+    sensor.set_release_threshold(global_release)
+
+    # per-pad overrides
+    for i in range(13):
+        tth = pad_touch_thresholds.get(i)
+        rth = pad_release_thresholds.get(i)
+        if tth is not None:
+            sensor.set_touch_threshold_for(i, tth)
+        if rth is not None:
+            sensor.set_release_threshold_for(i, rth)
+
+    if debug:
+        print(f"[mpr121_listener] started @0x{address:02X}")
+        print(f"  global touch/release = {global_touch}/{global_release}")
+        print("  per-pad config:")
+        time.sleep(1)
+        sensor.update_all()
+        for i in range(13):
+            key = PAD_KEY_MAPPING.get(i, f"PAD{i}")
+            tth = pad_touch_thresholds.get(i, global_touch)
+            rth = pad_release_thresholds.get(i, global_release)
+            base = sensor.get_baseline_data(i)
+            filt = sensor.get_filtered_data(i)
+            diff = filt - base
+            print(f"   - pad{i}: {key:<15} touch={tth:3d} rel={rth:3d} base={base:4d} filt={filt:4d} diff={diff:+5d}")
+    else:
+        print(f"[mpr121_listener] started @0x{address:02X} touch={global_touch} release={global_release}")
 
     running = True
 
     while running:
         try:
             if sensor.touch_status_changed():
-                sensor.update_touch_data()
+                sensor.update_all()
                 # iterate through pads 0..11 (touch electrodes)
                 for i in range(12):
                     key = PAD_KEY_MAPPING.get(i, f"PAD{i}")
                     # NEW TOUCH: start repeat thread (if not already running)
                     if sensor.is_new_touch(i):
                         if debug:
-                            print(f"electrode {i} was just touched => {key}")
+                            base = sensor.get_baseline_data(i)
+                            filt = sensor.get_filtered_data(i)
+                            diff = filt - base
+                            print(f"[mpr121] TOUCH pad{i} -> {key:<15} base={base:4d} filt={filt:4d} diff={diff:+5d}")
                         if key not in repeat_threads:
                             # initialize repeat counter and emit first press ("00")
                             repeat_counts[key] = 0
@@ -210,11 +264,11 @@ def mpr121_listener(process_key, config):
                     # RELEASE: stop repeat thread by removing entries
                     elif sensor.is_new_release(i):
                         if debug:
-                            print(f"electrode {i} was just released => {key}")
+                            print(f"[mpr121] TOUCH pad{i} -> {key:<15} was just released")
                         repeat_counts.pop(key, None)
                         repeat_threads.pop(key, None)
 
-            time.sleep(0.01)
+            time.sleep(0.03)
         except KeyboardInterrupt:
             running = False
         except Exception as e:
