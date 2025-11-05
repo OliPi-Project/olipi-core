@@ -179,9 +179,9 @@ def mpr121_listener(process_key, config):
         # fallback default mapping
         PAD_KEY_MAPPING = {
             0: "KEY_UP",
-            1: "KEY_DOWN",
-            2: "KEY_LEFT",
-            3: "KEY_RIGHT",
+            1: "KEY_RIGHT",
+            2: "KEY_DOWN",
+            3: "KEY_LEFT",
             4: "KEY_OK",
             5: "KEY_BACK",
             6: "KEY_CHANNELUP",
