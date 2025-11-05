@@ -1,15 +1,8 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright 2025 OliPi Project (Benoit Toufflet)
+#
 # test_prox.py
-#
-# Demonstrates the use of the MPR121 capacitive touch sensor with
-# 12 touch electrodes + 1 virtual proximity electrode (ELE0..ELE11 + ELE13).
-#
-# The script shows:
-#  - Real-time visualization of touch/proximity levels
-#  - Baseline and filtered data difference
-#  - Color-coded output depending on activation strength
-#  - Use of logging configuration
 #
 # Press Ctrl+C to exit.
 
