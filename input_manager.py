@@ -14,6 +14,8 @@ try:
 except ImportError:
     GPIO = None
 
+repeat_lock = threading.Lock()
+
 # === Constants ===
 DEBOUNCE_DELAY = 0.15
 BOUNCETIME_DELAY = 0.05
@@ -41,21 +43,22 @@ def repeat_sender(key: str, check_fn):
     - check_fn: callable returning True while "pressed"
     - REPEAT_INTERVAL: seconds between repeats
     """
-    try:
-        while key in repeat_counts:
-            time.sleep(REPEAT_INTERVAL)
-            # ask the provided check function if input is still active
-            if check_fn():
-                repeat_counts[key] += 1
-                repeat_code = f"{repeat_counts[key]:02x}"
-                process_key(key, repeat_code)
-            else:
+    while True:
+        time.sleep(REPEAT_INTERVAL)
+        with repeat_lock:
+            # Check if key still exists and is being pressed
+            if key not in repeat_counts or not check_fn():
                 break
-    finally:
-        # cleanup even on exceptions
+            repeat_counts[key] += 1
+            count = repeat_counts[key]
+
+        repeat_code = f"{count:02x}"
+        process_key(key, repeat_code)
+
+    # Cleanup thread-safe
+    with repeat_lock:
         repeat_counts.pop(key, None)
         repeat_threads.pop(key, None)
-
 
 # --- GPIO button event callback ---
 def gpio_event(button_pressed, key):
@@ -149,7 +152,7 @@ def lirc_listener(process_key, config):
 def mpr121_listener(process_key, config):
     from .olipicap.mpr121 import MPR121
 
-    address = int(config.get("mpr121", "i2c_address", fallback="0x5A"),0)
+    address = int(config.get("mpr121", "i2c_address", fallback="0x5A"), 0)
     int_pin = config.getint("mpr121", "int_pin", fallback=None)
 
     # --- Load pad configuration ---
@@ -193,7 +196,8 @@ def mpr121_listener(process_key, config):
             12: "KEY_PROX",
         }
 
-    # --- Apply thresholds ---
+    # --- Init sensor ---
+    time.sleep(1.0)
     sensor = MPR121(address)
     if not sensor.begin():
         if show_message:
@@ -218,6 +222,75 @@ def mpr121_listener(process_key, config):
         if rth is not None:
             sensor.set_release_threshold_for(i, rth)
 
+    # --- Gesture tracking ---
+    gesture_history = []
+    gesture_timer = None
+    GESTURE_TIMEOUT = 0.3
+    DIR_NAMES = {0:"UP",1:"RIGHT",2:"DOWN",3:"LEFT"}
+    CLOCKWISE = [0,1,2,3]
+    COUNTERCLOCKWISE = [0,3,2,1]
+
+    def detect_swipe(seq):
+        if 4 not in seq:  # center pad missing
+            return None
+        idx_c = seq.index(4)
+        if idx_c == 0 or idx_c == len(seq)-1:
+            return None
+        start = seq[idx_c-1]
+        end = seq[idx_c+1]
+        if start == 3 and end == 1:
+            return "swipe_right"
+        if start == 1 and end == 3:
+            return "swipe_left"
+        if start == 0 and end == 2:
+            return "swipe_down"
+        if start == 2 and end == 0:
+            return "swipe_up"
+        return None
+
+    def detect_rotation(seq):
+        nums = [p for p in seq if p in (0,1,2,3)]
+        if len(nums) < 3:
+            return None
+        for i in range(4):
+            cw = CLOCKWISE[i:] + CLOCKWISE[:i]
+            ccw = COUNTERCLOCKWISE[i:] + COUNTERCLOCKWISE[:i]
+            if all(n in cw for n in nums):
+                idx = 0
+                for n in nums:
+                    while idx < 4 and cw[idx] != n:
+                        idx += 1
+                    if idx >= 4: break
+                else:
+                    return "rotate_clockwise"
+            if all(n in ccw for n in nums):
+                idx = 0
+                for n in nums:
+                    while idx < 4 and ccw[idx] != n:
+                        idx += 1
+                    if idx >= 4: break
+                else:
+                    return "rotate_counterclockwise"
+        return None
+
+    def send_simple_keys():
+        nonlocal gesture_history, gesture_timer
+        gesture_timer = None
+        if len(gesture_history) == 1:
+            t = gesture_history[0]
+            key = PAD_KEY_MAPPING.get(t)
+            with repeat_lock:
+                if key not in repeat_threads:
+                    if debug:
+                        print(f"[MPR121][JOYSTICK] Simple Key: {key}")
+                    repeat_counts[key] = 0
+                    process_key(key, "00")
+                    check_fn = lambda s=sensor, idx=t: s.get_touch_data(idx)
+                    t_thread = threading.Thread(target=repeat_sender, args=(key, check_fn), daemon=True)
+                    repeat_threads[key] = t_thread
+                    t_thread.start()
+        gesture_history.clear()
+
     if debug:
         print(f"[mpr121_listener] started @0x{address:02X}")
         print(f"  global touch/release = {global_touch}/{global_release}")
@@ -235,40 +308,87 @@ def mpr121_listener(process_key, config):
     else:
         print(f"[mpr121_listener] started @0x{address:02X} touch={global_touch} release={global_release}")
 
+    last_state = set()
     running = True
+    gesture_active = config.getboolean("mpr121", "use_gesture", fallback=False)
 
     while running:
         try:
             if sensor.touch_status_changed():
                 sensor.update_all()
-                # iterate through pads 0..11 (touch electrodes)
-                for i in range(12):
-                    key = PAD_KEY_MAPPING.get(i, f"PAD{i}")
-                    # NEW TOUCH: start repeat thread (if not already running)
-                    if sensor.is_new_touch(i):
-                        if debug:
-                            base = sensor.get_baseline_data(i)
-                            filt = sensor.get_filtered_data(i)
-                            diff = filt - base
-                            print(f"[mpr121] TOUCH pad{i} -> {key:<15} base={base:4d} filt={filt:4d} diff={diff:+5d}")
-                        if key not in repeat_threads:
-                            # initialize repeat counter and emit first press ("00")
-                            repeat_counts[key] = 0
-                            process_key(key, "00")
+                # range(5) for "joystick" gesture
+                touched = {i for i in range(5) if sensor.is_new_touch(i)}
+                released = {i for i in range(5) if sensor.is_new_release(i)}
 
-                            # check_fn for this pad: poll sensor.get_touch_data(i)
-                            check_fn = (lambda s=sensor, idx=i: s.get_touch_data(idx))
-                            t = threading.Thread(target=repeat_sender, args=(key, check_fn), daemon=True)
-                            repeat_threads[key] = t
-                            t.start()
-                    # RELEASE: stop repeat thread by removing entries
-                    elif sensor.is_new_release(i):
-                        if debug:
-                            print(f"[mpr121] TOUCH pad{i} -> {key:<15} was just released")
-                        repeat_counts.pop(key, None)
-                        repeat_threads.pop(key, None)
+                # --- 1. Handle new touches (gesture / single key detection) ---
+                if gesture_active and touched:
+                    for t in touched:
+                        if not gesture_history or gesture_history[-1] != t:
+                            gesture_history.append(t)
 
-            time.sleep(0.03)
+                    # Cancel timer if new gesture in progress
+                    if gesture_timer:
+                        gesture_timer.cancel()
+
+                    swipe = detect_swipe(gesture_history)
+                    rotation = detect_rotation(gesture_history)
+
+                    if swipe is not None:
+                        if debug:
+                            print(f"[MPR121][JOYSTICK] Gesture: {swipe}")
+                        gesture_history.clear()
+                    elif rotation is not None:
+                        if debug:
+                            print(f"[MPR121][JOYSTICK] Gesture: {rotation}")
+                        gesture_history.clear()
+                    else:
+                        # Start timer if no gesture found yet
+                        gesture_timer = threading.Timer(GESTURE_TIMEOUT, send_simple_keys)
+                        gesture_timer.start()
+
+                # --- 2. Handle releases (independent of touches) ---
+                elif gesture_active and released:
+                    for t in released:
+                        key = PAD_KEY_MAPPING.get(t)
+                        with repeat_lock:
+                            repeat_counts.pop(key, None)
+                            repeat_threads.pop(key, None)
+                    if len(gesture_history) == 1 and not (swipe or rotation):
+                        if gesture_timer:
+                            gesture_timer.cancel()
+                        send_simple_keys()
+
+                else:
+                    # iterate through pads 0..11 (touch electrodes)
+                    for i in range(12):
+                        key = PAD_KEY_MAPPING.get(i, f"PAD{i}")
+                        # NEW TOUCH: start repeat thread (if not already running)
+                        if sensor.is_new_touch(i):
+                            with repeat_lock:
+                                if debug:
+                                    base = sensor.get_baseline_data(i)
+                                    filt = sensor.get_filtered_data(i)
+                                    diff = filt - base
+                                    print(f"[MPR121] TOUCH pad{i} -> {key:<15} base={base:4d} filt={filt:4d} diff={diff:+5d}")
+                                if key not in repeat_threads:
+                                    # initialize repeat counter and emit first press ("00")
+                                    repeat_counts[key] = 0
+                                    process_key(key, "00")
+
+                                    # check_fn for this pad: poll sensor.get_touch_data(i)
+                                    check_fn = (lambda s=sensor, idx=i: s.get_touch_data(idx))
+                                    t = threading.Thread(target=repeat_sender, args=(key, check_fn), daemon=True)
+                                    repeat_threads[key] = t
+                                    t.start()
+                        # RELEASE: stop repeat thread by removing entries
+                        elif sensor.is_new_release(i):
+                            with repeat_lock:
+                                if debug:
+                                    print(f"[MPR121] TOUCH pad{i} -> {key:<15} was just released")
+                                repeat_counts.pop(key, None)
+                                repeat_threads.pop(key, None)
+
+            time.sleep(0.01)
         except KeyboardInterrupt:
             running = False
         except Exception as e:
