@@ -311,7 +311,6 @@ class MPR121:
         if self.reset():
             # apply defaults (this will also set thresholds)
             self.apply_settings(self.default_settings)
-            print("MPR121 initialized successfully")
             return True
         print("MPR121 initialization failed")
         return False
