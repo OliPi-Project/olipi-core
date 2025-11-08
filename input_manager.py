@@ -197,7 +197,7 @@ def mpr121_listener(process_key, config):
         }
 
     # --- Init sensor ---
-    time.sleep(1.0)
+    time.sleep(0.5)
     sensor = MPR121(address)
     if not sensor.begin():
         if show_message:
@@ -288,11 +288,11 @@ def mpr121_listener(process_key, config):
                     t_thread.start()
         gesture_history.clear()
 
+    time.sleep(0.5)
     if debug:
         print(f"[mpr121_listener] started @0x{address:02X}")
         print(f"  global touch/release = {global_touch}/{global_release}")
         print("  per-pad config:")
-        time.sleep(1)
         sensor.update_all()
         for i in range(13):
             key = PAD_KEY_MAPPING.get(i, f"PAD{i}")
@@ -316,7 +316,7 @@ def mpr121_listener(process_key, config):
                 touched = {i for i in range(5) if sensor.is_new_touch(i)}
                 released = {i for i in range(5) if sensor.is_new_release(i)}
 
-                # --- 1. Handle new touches (gesture / single key detection) ---
+                # --- 1. Handle new touches (gesture / single key detection for the first 5 pads) ---
                 if gesture_active and touched:
                     for t in touched:
                         if not gesture_history or gesture_history[-1] != t:
@@ -342,7 +342,7 @@ def mpr121_listener(process_key, config):
                         gesture_timer = threading.Timer(GESTURE_TIMEOUT, send_simple_keys)
                         gesture_timer.start()
 
-                # --- 2. Handle releases (independent of touches) ---
+                # --- 2. Handle releases (gesture / single key detection for the first 5 pads) ---
                 elif gesture_active and released:
                     for t in released:
                         key = PAD_KEY_MAPPING.get(t)
@@ -355,7 +355,7 @@ def mpr121_listener(process_key, config):
                         send_simple_keys()
 
                 else:
-                    # iterate through pads 0..11 (touch electrodes)
+                    # iterate through pads 0..11 (touch electrodes not used for gestures or disabled)
                     for i in range(12):
                         key = PAD_KEY_MAPPING.get(i, f"PAD{i}")
                         # NEW TOUCH: start repeat thread (if not already running)
@@ -384,7 +384,7 @@ def mpr121_listener(process_key, config):
                                 repeat_counts.pop(key, None)
                                 repeat_threads.pop(key, None)
 
-            time.sleep(0.01)
+            time.sleep(0.1)
         except KeyboardInterrupt:
             running = False
         except Exception as e:
@@ -396,8 +396,12 @@ def mpr121_listener(process_key, config):
 def rotary_listener(pin_a, pin_b, process_key, config=None):
     divider = config.getint("rotary", "rotary_divider", fallback=2)
     invert = config.getboolean("rotary", "rotary_invert", fallback=False)
-    debounce_rot = int(config.getfloat("rotary", "rotary_bouncetime_ms", fallback=2))
-    min_tick_ms = int(config.getfloat("rotary", "rotary_min_tick_ms", fallback=2))
+    min_tick_ms = config.getfloat("rotary", "rotary_min_tick_ms", fallback=2)
+    try:
+        rotary_bouncetime_ms = config.getint("rotary", "rotary_bouncetime_ms", fallback=10)
+    except ValueError:
+        print("Error: rotary_bouncetime_ms must be an integer. Fallback to 10ms")
+        rotary_bouncetime_ms = 10
 
     if debug:
         print(f"[rotary_listener] start pins A={pin_a} B={pin_b} divider={divider} invert={invert}")
@@ -433,11 +437,8 @@ def rotary_listener(pin_a, pin_b, process_key, config=None):
 
         last_state_a = a_state
 
-    GPIO.add_event_detect(pin_a, GPIO.BOTH, callback=handle_edge, bouncetime=debounce_rot)
-    GPIO.add_event_detect(pin_b, GPIO.BOTH, callback=handle_edge, bouncetime=debounce_rot)
-
-    if debug:
-        print("[rotary_listener] interrupt mode active (A-phase decode)")
+    GPIO.add_event_detect(pin_a, GPIO.BOTH, callback=handle_edge, bouncetime=rotary_bouncetime_ms)
+    GPIO.add_event_detect(pin_b, GPIO.BOTH, callback=handle_edge, bouncetime=rotary_bouncetime_ms)
 
     try:
         while True:
@@ -478,13 +479,19 @@ def start_inputs(config, process_press, msg_hook=None):
 
     # GPIO boutons
     if config.getboolean("input", "use_buttons", fallback=False):
-        debounce_buttons = int(config.getfloat("buttons", "buttons_bouncetime_ms", fallback=5))
+        try:
+            buttons_bouncetime_ms = config.getint("buttons", "buttons_bouncetime_ms", fallback=10)
+        except ValueError:
+            print("Error: buttons_bouncetime_ms must be an integer. Fallback to 10ms")
+            buttons_bouncetime_ms = 10
         if GPIO is None:
             print("error: gpio missing")
             if show_message:
                 show_message("error: gpio missing")
         elif config.has_section("buttons"):
             for key, pin in config.items("buttons"):
+                if not key.upper().startswith("KEY_"):
+                    continue
                 try:
                     pin = int(pin)
                     GPIO.setup(pin, GPIO.IN, pull_up_down=GPIO.PUD_UP)
@@ -492,7 +499,7 @@ def start_inputs(config, process_press, msg_hook=None):
                         pin,
                         GPIO.BOTH,
                         callback=lambda ch, k=key.upper(), p=pin: gpio_event(p, k),
-                        bouncetime=debounce_buttons,
+                        bouncetime=buttons_bouncetime_ms,
                     )
                 except Exception as e:
                     if show_message:
