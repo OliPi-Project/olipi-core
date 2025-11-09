@@ -12,9 +12,15 @@ OliPi Core is the base for creating Python3 user interface to display on i2c/SPI
 
 ## ❔ What's new?
 
-**<u>V0.2.0-pre</u>**
+**<u>V0.2.5-pre</u>**
 
-*Change of approach for SPI displays: they now use the FBTFT overlay directly instead of going through the Adafruit lib. For I2C screens, I've switched to Luma.oled.*
+- Add support for MPR121 capacitive touch with a beginnings of gesture support
+- Add independent debounce settings depending on input
+- Add support for SSD1306 SPI with FBTFT "not tested"
+- Add support for ST7789 2.4" & 2.8"
+- Add invert options & diag, can be configured in ini
+- Better rotary management with GPIO interup 
+- And other odds and ends
 
 ## 📦 System requirements
 
@@ -30,18 +36,18 @@ OliPi Core is the base for creating Python3 user interface to display on i2c/SPI
 - **APT dependencies**:
   
   ```
-  python3-pil python3-venv python3-pip python3-tk
-  i2c-tools libgpiod-dev python3-libgpiod python3-lgpio python3-setuptools
+  git python3-pil python3-venv python3-pip python3-tk libasound2-dev libatlas-base-dev libopenblas0-pthread libgfortran5 i2c-tools libgpiod-dev python3-libgpiod python3-lgpio python3-setuptools
   ```
 
 - **Python dependencies**:
   
   ```
-  luma.oled~=3.14.0
-  luma_core~=2.5.1
-  Pillow~=11.3.0
-  PyYAML~=6.0.2
-  rpi_lgpio~=0.6
+  luma.oled>=3.14.0
+  luma_core>=2.5.2
+  Pillow>=12.0.0
+  PyYAML>=6.0.3
+  rpi_lgpio>=0.6
+  numpy>=2.3.4
   ```
 
 
