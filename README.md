@@ -32,6 +32,7 @@ OliPi Core is the base for creating Python3 user interface to display on i2c/SPI
       - I2C/SPI Screen. 
       - IR receiver type TSOP38 or similar (if used)
       - Push Button and/or Rotary Encoder (if used)
+      - MPR121 capacitive touch module (if used)
 
 - **APT dependencies**:
   
