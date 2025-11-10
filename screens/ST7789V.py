@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: GPL-3.0-or-later
-# Copyright 2025 OliPi Project (Benoit Toufflet)
+# Copyright 2025 OliPi Project
 
 # screens/ST7789V.py
 
@@ -13,18 +13,17 @@ import numpy as _np
 
 FB_NAME = "fb_st7789v"
 
-def get_oled_fb():
+def get_fb():
     for fb in os.listdir("/sys/class/graphics"):
         with open(f"/sys/class/graphics/{fb}/name") as f:
             if f.read().strip() == FB_NAME:
                 return f"/dev/{fb}"
     return None
 
-FB_DEVICE = get_oled_fb()
-
+FB_DEVICE = get_fb()
 BACKLIGHT_PATH = f"/sys/class/backlight/{FB_NAME}/bl_power"
 
-# --- Overlay framebuffer size (from fbtft overlay) ---
+# --- Overlay framebuffer size ---
 FB_WIDTH = 240
 FB_HEIGHT = 320
 
@@ -32,9 +31,10 @@ FB_HEIGHT = 320
 PHYSICAL_WIDTH = 240
 PHYSICAL_HEIGHT = 320
 
-ROTATION = get_config("screen", "rotation", fallback=90, type=int)  # must be one of (0,90,180,270)
+ROTATION = get_config("screen", "rotation", fallback=90, type=int)
 DISPLAY_FORMAT = get_config("screen", "display_format", fallback="RGB", type=str)
-DIAG_INCH = 2.0
+INVERT = get_config("screen", "invert", fallback=False, type=bool)
+DIAG_INCH = get_config("screen", "diag", fallback=2.0, type=float)
 
 # Validate rotation
 if ROTATION not in (0, 90, 180, 270):
@@ -70,21 +70,39 @@ def _convert_image_to_rgb565_into_buf(buf_img):
     """
     Convert PIL Image (RGB) to RGB565 bytes placed into the preallocated
     bytearray _rgb565_buf. Returns a memoryview of the filled portion.
-    Vectorised numpy conversion; assumes little-endian CPU (Raspberry Pi).
+
+    If INVERT is True, invert RGB channels (255 - value) before packing.
+    This does the inversion inside NumPy to avoid creating a new PIL Image
+    (faster and fewer allocations).
     """
     w, h = buf_img.size
     _ensure_rgb565_buf(w, h)
 
-    # get raw RGB bytes from PIL (no extra conversions)
-    raw = buf_img.tobytes("raw", "RGB")  # bytes object, contiguous
+    # ensure we have RGB bytes
+    if buf_img.mode != "RGB":
+        raw = buf_img.convert("RGB").tobytes("raw", "RGB")
+    else:
+        # returns bytes object
+        raw = buf_img.tobytes("raw", "RGB")
+
+    # Create a uint8 view of the raw bytes and reshape to (h, w, 3)
     arr = _np.frombuffer(raw, dtype=_np.uint8).reshape((h, w, 3))
 
-    # vectorised conversion to RGB565 (uint16)
-    r = arr[:, :, 0].astype(_np.uint16)
-    g = arr[:, :, 1].astype(_np.uint16)
-    b = arr[:, :, 2].astype(_np.uint16)
+    # Apply optional inversion per-channel (vectorised)
+    if INVERT:
+        # use 255 - arr on each channel; this creates a new temporary array
+        # but remains entirely in NumPy (fast), avoids PIL copy.
+        r = (255 - arr[:, :, 0]).astype(_np.uint16)
+        g = (255 - arr[:, :, 1]).astype(_np.uint16)
+        b = (255 - arr[:, :, 2]).astype(_np.uint16)
+    else:
+        r = arr[:, :, 0].astype(_np.uint16)
+        g = arr[:, :, 1].astype(_np.uint16)
+        b = arr[:, :, 2].astype(_np.uint16)
 
+    # vectorised conversion to RGB565 (uint16)
     rgb565 = ((r & 0xF8) << 8) | ((g & 0xFC) << 3) | (b >> 3)   # uint16 array shape (h,w)
+
     # view as uint8 (native byteorder). On little-endian this yields lo,hi order.
     rgb8 = rgb565.view(_np.uint8).reshape(-1)
 
@@ -98,6 +116,7 @@ def refresh(img: Image.Image = None):
     """
     Optimized partial refresh for small TFT:
      - rotate the logical image first (so rotation is preserved)
+     - optionally invert colors if requested via config
      - scale down if necessary
      - convert only the rotated logical image to RGB565 (into reuse buffer)
      - write blocks of rows into /dev/fbN using os.lseek + os.write
@@ -184,4 +203,3 @@ def poweron_safe():
         except subprocess.CalledProcessError as e:
             print(f"Backlight ON failed for {FB_NAME}: {e.stderr.decode().strip()}")
     refresh()
-    

@@ -6,15 +6,21 @@
 
 # OliPi Core
 
-OliPi Core is the base for creating Python3 user interface to display on i2c/SPI screens with control via IR remote and/or GPIO buttons.
+OliPi Core is the base for creating Python3 user interface to display on i2c/SPI screens with control via IR remote and/or GPIO buttons. And now with MPR121 capacitive touch module.
 
 ---
 
 ## ❔ What's new?
 
-**<u>V0.2.0-pre</u>**
+**<u>V0.2.5-pre</u>**
 
-*Change of approach for SPI displays: they now use the FBTFT overlay directly instead of going through the Adafruit lib. For I2C screens, I've switched to Luma.oled.*
+- Add support for MPR121 capacitive touch with a beginnings of gesture support
+- Add independent debounce settings depending on input
+- Add support for SSD1306 SPI with FBTFT "not tested"
+- Add support for ST7789 2.4" & 2.8"
+- Add invert options & diag, can be configured in ini
+- Better rotary management with GPIO interup 
+- And other odds and ends
 
 ## 📦 System requirements
 
@@ -26,22 +32,36 @@ OliPi Core is the base for creating Python3 user interface to display on i2c/SPI
       - I2C/SPI Screen. 
       - IR receiver type TSOP38 or similar (if used)
       - Push Button and/or Rotary Encoder (if used)
+      - MPR121 capacitive touch module (if used)
+
+- **Screens supported**:
+  
+  | Screen      | Resolution | Diag (") | PPI | Color      | Script                       |
+  | ----------- | ---------- | -------- | --- | ---------- | ---------------------------- |
+  | SSD1309     | 128×64     | 2.49     | 58  | Monochrome | SSD1306.py                   |
+  | SSD1306     | 128×64     | 0.96     | 149 | Monochrome | SSD1306.py                   |
+  | SSD1306 SPI (Not Tested) | 128×64 | 0.96 | 149 | Monochrome | SSD1306SPI.py           |
+  | SSD1315     | 128×64     | 0.96     | 149 | Monochrome | SSD1306.py                   |
+  | SSD1351     | 128×128    | 1.5      | 120 | RGB        | SSD1351.py                   |
+  | ST7735R     | 128×160    | 1.77     | 116 | RGB        | ST7735R.py                   |
+  | ST7789 1.9" | 170×320    | 1.9      | 191 | RGB        | ST7789W.py                   |
+  | ST7789 2" 2.4" 2.8" | 240×320 | 2.0   | 200 | RGB      | ST7789V.py                   |
 
 - **APT dependencies**:
   
   ```
-  python3-pil python3-venv python3-pip python3-tk
-  i2c-tools libgpiod-dev python3-libgpiod python3-lgpio python3-setuptools
+  git python3-pil python3-venv python3-pip python3-tk libasound2-dev libatlas-base-dev libopenblas0-pthread libgfortran5 i2c-tools libgpiod-dev python3-libgpiod python3-lgpio python3-setuptools
   ```
 
 - **Python dependencies**:
   
   ```
-  luma.oled~=3.14.0
-  luma_core~=2.5.1
-  Pillow~=11.3.0
-  PyYAML~=6.0.2
-  rpi_lgpio~=0.6
+  luma.oled>=3.14.0
+  luma_core>=2.5.2
+  Pillow>=12.0.0
+  PyYAML>=6.0.3
+  rpi_lgpio>=0.6
+  numpy>=2.3.4
   ```
 
 
