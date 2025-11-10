@@ -34,6 +34,19 @@ OliPi Core is the base for creating Python3 user interface to display on i2c/SPI
       - Push Button and/or Rotary Encoder (if used)
       - MPR121 capacitive touch module (if used)
 
+- **Screens supported**:
+  
+  | Screen      | Resolution | Diag (") | PPI | Color      | Script                       |
+  | ----------- | ---------- | -------- | --- | ---------- | ---------------------------- |
+  | SSD1309     | 128×64     | 2.49     | 58  | Monochrome | SSD1306.py                   |
+  | SSD1306     | 128×64     | 0.96     | 149 | Monochrome | SSD1306.py                   |
+  | SSD1306 SPI (Not Tested) | 128×64 | 0.96 | 149 | Monochrome | SSD1306SPI.py           |
+  | SSD1315     | 128×64     | 0.96     | 149 | Monochrome | SSD1306.py                   |
+  | SSD1351     | 128×128    | 1.5      | 120 | RGB        | SSD1351.py                   |
+  | ST7735R     | 128×160    | 1.77     | 116 | RGB        | ST7735R.py                   |
+  | ST7789 1.9" | 170×320    | 1.9      | 191 | RGB        | ST7789W.py                   |
+  | ST7789 2" 2.4" 2.8" | 240×320 | 2.0   | 200 | RGB      | ST7789V.py                   |
+
 - **APT dependencies**:
   
   ```
