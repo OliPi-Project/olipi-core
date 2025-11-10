@@ -12,7 +12,7 @@ OliPi Core is the base for creating Python3 user interface to display on i2c/SPI
 
 ## ❔ What's new?
 
-**<u>V0.2.5-pre</u>**
+**<u>V0.3.0-pre</u>**
 
 - Add support for MPR121 capacitive touch with a beginnings of gesture support
 - Add independent debounce settings depending on input
