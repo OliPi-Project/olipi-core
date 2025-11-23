@@ -7,6 +7,7 @@ import time
 import yaml
 import threading
 from pathlib import Path
+from copy import deepcopy
 from .core_config import config, get_config, save_config, reload_config
 from importlib import import_module
 from olipi_core import screens
@@ -17,7 +18,8 @@ if env_dir:
 else:
     OLIPI_DIR = Path.cwd()
 
-THEME_PATH = OLIPI_DIR / "theme_colors.yaml"
+THEME_PATH_MAIN = OLIPI_DIR / "theme_colors.yaml"
+THEME_PATH_USER = OLIPI_DIR / "theme_user.yaml"
 
 OLIPICORE_DIR = Path(__file__).resolve().parent
 MASK_PATH = OLIPICORE_DIR / "mask.png"
@@ -92,12 +94,32 @@ THEME_NAME = get_config("settings", "color_theme", fallback="default", type=str)
 if display_format.upper() == "MONO":
     THEME_NAME = "default"
 
+def deep_merge(base, override):
+    for key, val in override.items():
+        if (
+            key in base
+            and isinstance(base[key], dict)
+            and isinstance(val, dict)
+        ):
+            base[key] = deep_merge(base[key], val)
+        else:
+            base[key] = val
+    return base
+
 def load_theme_file():
-    if not THEME_PATH.exists():
-        print("Theme file missing")
-        return {}
-    with open(THEME_PATH, "r", encoding="utf-8") as f:
-        return yaml.safe_load(f) or {}
+    themes = {}
+    if THEME_PATH_MAIN.exists():
+        with THEME_PATH_MAIN.open("r", encoding="utf-8") as f:
+            data = yaml.safe_load(f) or {}
+            themes.update(data)
+    default_theme = themes.get("default", {})
+    if THEME_PATH_USER.exists():
+        with THEME_PATH_USER.open("r", encoding="utf-8") as f:
+            user_data = yaml.safe_load(f) or {}
+            for theme_name, theme_data in user_data.items():
+                base_theme = deepcopy(default_theme)
+                themes[theme_name] = deep_merge(base_theme, theme_data)
+    return themes
 
 # --- Color handling ---
 def load_theme(theme_name="default"):
