@@ -214,6 +214,17 @@ def t(key, **kwargs):
             print(f"Missing placeholder {e} in key '{key}'")
         return template
 
+def get_theme_menu():
+    themes = load_theme_file()
+    menu = []
+    for theme_id in themes.keys():
+        key = f"theme_{theme_id}"
+        label = t(key)
+        if label == key:
+            label = theme_id
+        menu.append({"id": theme_id, "label": label})
+    return menu
+
 def draw_custom_menu(options, selection, title="Menu", multi=None, checkmark="✓ "):
     """Full-width menu, spacing/scroll dynamic, fixed line height, selection rectangle aligned to text."""
     global scroll_state
