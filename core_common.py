@@ -83,11 +83,11 @@ def detect_refresh_interval():
     elif "Raspberry Pi 3" in model:
         return 0.05 if ppi >= BASE_PPI else 0.05
     elif "Raspberry Pi 4" in model:
-        return 0.1
+        return 0.07
     elif "Raspberry Pi 5" in model:
-        return 0.1
+        return 0.08
     else:
-        return 0.03
+        return 0.05
 REFRESH_INTERVAL = detect_refresh_interval()
 
 THEME_NAME = get_config("settings", "color_theme", fallback="default", type=str)
