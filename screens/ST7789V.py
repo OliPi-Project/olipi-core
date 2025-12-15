@@ -15,12 +15,16 @@ FB_NAME = "fb_st7789v"
 
 def get_fb():
     for fb in os.listdir("/sys/class/graphics"):
-        with open(f"/sys/class/graphics/{fb}/name") as f:
+        name_path = f"/sys/class/graphics/{fb}/name"
+        if not os.path.exists(name_path):
+            continue
+        with open(name_path) as f:
             if f.read().strip() == FB_NAME:
                 return f"/dev/{fb}"
     return None
 
 FB_DEVICE = get_fb()
+
 BACKLIGHT_PATH = f"/sys/class/backlight/{FB_NAME}/bl_power"
 
 # --- Overlay framebuffer size ---
