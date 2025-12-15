@@ -9,10 +9,15 @@ from pathlib import Path
 from PIL import Image, ImageDraw, ImageFont
 from ..core_config import get_config
 
+FB_NAME = "fb_ssd1306"
+
 def get_fb():
     for fb in os.listdir("/sys/class/graphics"):
-        with open(f"/sys/class/graphics/{fb}/name") as f:
-            if f.read().strip() == "fb_ssd1306":
+        name_path = f"/sys/class/graphics/{fb}/name"
+        if not os.path.exists(name_path):
+            continue
+        with open(name_path) as f:
+            if f.read().strip() == FB_NAME:
                 return f"/dev/{fb}"
     return None
 
