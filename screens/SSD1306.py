@@ -6,12 +6,21 @@
 
 from PIL import Image, ImageDraw, ImageFont
 from ..core_config import get_config
-from luma.core.interface.serial import i2c
+from luma.core.interface.serial import i2c, spi
 from luma.oled.device import ssd1306, ssd1309
 
-# --- I2C serial interface ---
-I2C_ADRESS = get_config("screen", "i2c_address", fallback="0x3C", type=str)
-SERIAL = i2c(port=1, address=I2C_ADRESS)
+CURRENT = get_config("screen", "current_screen", fallback="ssd1306", type=str).lower()
+TYPE = get_config("screen", "type", fallback="i2c", type=str)
+
+if TYPE.lower() == "spi2c":
+    GPIO_DC = get_config("screen", "gpio_dc", fallback=24, type=int)
+    GPIO_RST = get_config("screen", "gpio_rst", fallback=25, type=int)
+    SERIAL = spi(device=0, port=0, gpio_DC=GPIO_DC, gpio_RST=GPIO_RST)
+else:
+    # --- I2C serial interface ---
+    I2C_ADRESS = get_config("screen", "i2c_address", fallback="0x3C", type=str)
+    SERIAL = i2c(port=1, address=I2C_ADRESS)
+
 disp = ssd1306(SERIAL)
 
 # --- Exposed attributes for core_common ---
