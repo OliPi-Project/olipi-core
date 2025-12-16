@@ -9,7 +9,9 @@ from ..core_config import get_config
 from luma.core.interface.serial import i2c, spi
 from luma.oled.device import ssd1306, ssd1309
 
+CURRENT = get_config("screen", "current_screen", fallback="ssd1306", type=str).lower()
 TYPE = get_config("screen", "type", fallback="i2c", type=str)
+
 if TYPE.lower() == "spi2c":
     GPIO_DC = get_config("screen", "gpio_dc", fallback=24, type=int)
     GPIO_RST = get_config("screen", "gpio_rst", fallback=25, type=int)
@@ -18,7 +20,6 @@ else:
     # --- I2C serial interface ---
     I2C_ADRESS = get_config("screen", "i2c_address", fallback="0x3C", type=str)
     SERIAL = i2c(port=1, address=I2C_ADRESS)
-
 
 disp = ssd1306(SERIAL)
 
