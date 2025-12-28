@@ -24,9 +24,9 @@ else:
 disp = ssd1306(SERIAL)
 
 # --- Exposed attributes for core_common ---
-width = disp.width
-height = disp.height
-DIAG_INCH = 0.96
+width = get_config("screen", "width", fallback=128, type=int)
+height = get_config("screen", "height", fallback=64, type=int)
+DIAG_INCH = get_config("screen", "diag", fallback=0.96, type=float)
 DISPLAY_FORMAT = "MONO"
 
 # --- Logical drawing surface ---

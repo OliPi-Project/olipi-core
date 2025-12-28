@@ -32,8 +32,8 @@ FB_WIDTH = 128
 FB_HEIGHT = 160
 
 # --- Physical screen size ---
-PHYSICAL_WIDTH = 128
-PHYSICAL_HEIGHT = 160
+PHYSICAL_WIDTH = get_config("screen", "width", fallback=128, type=int)
+PHYSICAL_HEIGHT = get_config("screen", "height", fallback=160, type=int)
 
 ROTATION = get_config("screen", "rotation", fallback=90, type=int)  # must be (0,90,180,270)
 DISPLAY_FORMAT = get_config("screen", "display_format", fallback="RGB", type=str)
@@ -57,7 +57,7 @@ else:
 image = Image.new("RGB", (width, height))
 draw = ImageDraw.Draw(image)
 
-WRITE_BLOCK_ROWS = 8  # 4..16 is a good sweet spot
+WRITE_BLOCK_ROWS = 1
 
 # reusable buffers (module-level)
 _rgb565_buf = None  # will be a bytearray sized >= w*h*2
