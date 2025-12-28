@@ -16,10 +16,9 @@ Release Note:
 
     Latest updates:
 
+    - ST7789V 1.9" now use ST7789V.py script
+    - Resolution are saved in config.ini when configure screen during install
     - SSD1306, SSD1315 and SSD1309 SPI are now supported
-    ...
-
-    **<u>V0.3.0-pre</u>**
 
     - Add support for MPR121 capacitive touch with a beginnings of gesture support
     - Add independent debounce settings depending on input
