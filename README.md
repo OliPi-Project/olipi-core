@@ -52,23 +52,6 @@ Release Note:
     | ST7789 1.9" | 170×320    | 1.9      | RGB        |
     | ST7789 2" 2.4" 2.8" | 240×320 | 2.0   | RGB      |
 
-- **APT dependencies**:
-  
-  ```
-  git python3-pil python3-venv python3-pip python3-tk libasound2-dev libatlas-base-dev libopenblas0-pthread libgfortran5 i2c-tools libgpiod-dev python3-libgpiod python3-lgpio python3-setuptools
-  ```
-
-- **Python dependencies**:
-  
-  ```
-  luma.oled>=3.14.0
-  luma_core>=2.5.2
-  Pillow>=12.0.0
-  PyYAML>=6.0.3
-  rpi_lgpio>=0.6
-  numpy>=2.3.4
-  ```
-
 
 ### More Documentation to come ...
 
