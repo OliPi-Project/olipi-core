@@ -154,6 +154,8 @@ def mpr121_listener(process_key, config):
 
     address = int(config.get("mpr121", "i2c_address", fallback="0x5A"), 0)
     int_pin = config.getint("mpr121", "int_pin", fallback=None)
+    global_touch = config.getint("mpr121", "touch_threshold", fallback=30)
+    global_release = config.getint("mpr121", "release_threshold", fallback=20)
 
     # --- Pad mapping ---
     PAD_KEY_MAPPING = {}
@@ -174,8 +176,12 @@ def mpr121_listener(process_key, config):
                 else:
                     action, tth, rth = parts[0].upper(), None, None
                 PAD_KEY_MAPPING[pad_index] = action
-                pad_touch_thresholds[pad_index] = tth
-                pad_release_thresholds[pad_index] = rth
+                pad_touch_thresholds[pad_index] = (
+                    tth if tth is not None else global_touch
+                )
+                pad_release_thresholds[pad_index] = (
+                    rth if rth is not None else global_release
+                )
             except Exception as e:
                 print(f"error parsing {key}: {e}")
     else:
@@ -206,18 +212,13 @@ def mpr121_listener(process_key, config):
         return
 
     sensor.set_interrupt_pin(int_pin)
-
-    global_touch = config.getint("mpr121", "touch_threshold", fallback=20)
-    global_release = config.getint("mpr121", "release_threshold", fallback=15)
     sensor.set_touch_threshold(global_touch)
     sensor.set_release_threshold(global_release)
     for i in range(13):
-        tth = pad_touch_thresholds.get(i)
-        rth = pad_release_thresholds.get(i)
-        if tth is not None:
-            sensor.set_touch_threshold_for(i, tth)
-        if rth is not None:
-            sensor.set_release_threshold_for(i, rth)
+        tth = pad_touch_thresholds.get(i, global_touch)
+        rth = pad_release_thresholds.get(i, global_release)
+        sensor.set_touch_threshold_for(i, tth)
+        sensor.set_release_threshold_for(i, rth)
 
     # --- Gesture tracking ---
     gesture_history = []
