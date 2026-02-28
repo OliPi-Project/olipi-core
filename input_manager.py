@@ -122,6 +122,7 @@ def process_key(key, repeat_code, DEBOUNCE_DELAY=DEBOUNCE_DELAY):
     t.start()
 
 def lirc_listener(process_key, config):
+    lirc_bouncetime = config.getfloat("lirc", "lirc_bouncetime_s", fallback=0.20)
     try:
         proc = subprocess.Popen(
             ["irw"],
@@ -139,7 +140,7 @@ def lirc_listener(process_key, config):
                 if len(parts) >= 3:
                     key = parts[2].strip().upper()
                     repeat_code = parts[1].strip()
-                    process_key(key, repeat_code, 0.15)
+                    process_key(key, repeat_code, lirc_bouncetime)
     except FileNotFoundError:
         if show_message:
             show_message("error: lirc missing")
