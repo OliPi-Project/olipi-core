@@ -205,13 +205,13 @@ def load_translations(script_name="script"):
     else:
         print(f"No translation file found for script: {script_name}")
 
-def t(key, **kwargs):
-    template = translations.get(key, key)
+def t(msg_id, **kwargs):
+    template = translations.get(msg_id, msg_id)
     try:
         return template.format(**kwargs)
     except KeyError as e:
         if DEBUG:
-            print(f"Missing placeholder {e} in key '{key}'")
+            print(f"Missing placeholder {e} in key '{msg_id}'")
         return template
 
 def get_theme_menu():
