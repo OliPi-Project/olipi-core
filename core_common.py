@@ -209,9 +209,9 @@ def t(msg_id, **kwargs):
     template = translations.get(msg_id, msg_id)
     try:
         return template.format(**kwargs)
-    except KeyError as e:
+    except Exception as e:
         if DEBUG:
-            print(f"Missing placeholder {e} in key '{msg_id}'")
+            print(f"[i18n error] {msg_id}: {e}")
         return template
 
 def get_theme_menu():
