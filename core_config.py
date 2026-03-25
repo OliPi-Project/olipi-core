@@ -15,6 +15,7 @@ else:
 CONFIG_PATH = OLIPI_DIR / "config.ini"
 
 config = configparser.ConfigParser()
+config.optionxform = str
 config.read(CONFIG_PATH)
 
 def get_config(section, key, fallback=None, type=str):
