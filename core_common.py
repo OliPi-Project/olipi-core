@@ -160,6 +160,13 @@ load_theme(THEME_NAME)
 message_text = None
 message_start_time = 0
 message_permanent = False
+
+spinner_thread = None
+spinner_running = False
+spinner_text = ""
+spinner_extra = ""
+spinner_lock = threading.Lock()
+
 scroll_offset_message = 0
 scroll_speed_message = 1
 last_scroll_time = 0
@@ -398,49 +405,63 @@ def compute_message_layout(text):
     padding_x = max(2, int(width * 0.04))
     padding_y = max(2, int(height * 0.02))
 
-    # maximum box width inside screen margins
     max_box_w = max(80, width - 2 * margin)
 
-    # measure full text width (single-line)
-    test_w = draw.textlength(text, font=font_message)
+    # --- split explicit lines first ---
+    paragraphs = text.split("\n")
 
-    # choose box width: either snug to text or clamp to max_box_w
-    if test_w + 2 * padding_x <= max_box_w:
-        box_w = test_w + 2 * padding_x
-    else:
-        box_w = max_box_w
-
-    # wrap words to lines using the available inner width
-    inner_w = box_w - 2 * padding_x
-    words = text.strip().split()
     lines = []
-    cur = ""
-    for w in words:
-        candidate = (cur + " " + w) if cur else w
-        # measure candidate width using font getbbox
-        w_box = font_message.getbbox(candidate)
-        w_len = w_box[2] - w_box[0]
-        if w_len <= inner_w:
-            cur = candidate
-        else:
-            if cur:
-                lines.append(cur)
-            cur = w
-    if cur:
-        lines.append(cur)
 
-    # line height metric (stable baseline using "Ay")
+    for para in paragraphs:
+
+        words = para.strip().split()
+
+        if not words:
+            lines.append("")   # empty line support
+            continue
+
+        cur = ""
+
+        for w in words:
+
+            candidate = (cur + " " + w) if cur else w
+
+            w_box = font_message.getbbox(candidate)
+            w_len = w_box[2] - w_box[0]
+
+            inner_w = max_box_w - 2 * padding_x
+
+            if w_len <= inner_w:
+                cur = candidate
+            else:
+                if cur:
+                    lines.append(cur)
+                cur = w
+
+        if cur:
+            lines.append(cur)
+
+    # --- compute width from longest line ---
+    max_line_w = 0
+
+    for ln in lines:
+        if ln:
+            w_box = font_message.getbbox(ln)
+            w_len = w_box[2] - w_box[0]
+            max_line_w = max(max_line_w, w_len)
+
+    box_w = min(max_line_w + 2 * padding_x, max_box_w)
+
+    # --- line height ---
     line_h = font_message.getbbox("Ay")[3] - font_message.getbbox("Ay")[1] + 2
+
     total_text_height = len(lines) * line_h
-    # single line -> more padding, multi-line -> normal
+
     if len(lines) == 1:
         padding_y = max(padding_y, line_h)
 
-    # --- compute message box height (adapt to text, but clamp) ---
-    # desired height: text height + vertical paddings
     desired_h = total_text_height + 2 * padding_y
 
-    # min/max height
     min_box_h = line_h + 2 * padding_y
     max_box_h = height - 2 * margin
 
@@ -538,6 +559,45 @@ def message_updater():
 
 def start_message_updater():
     threading.Thread(target=message_updater, daemon=True).start()
+
+def _spinner_worker():
+    global message_text, spinner_running
+    frames = ["⣾","⣽","⣻","⢿","⡿","⣟","⣯","⣷"]
+    i = 0
+    while spinner_running:
+        with spinner_lock:
+            text = spinner_text
+            extra = spinner_extra
+        if extra:
+            message_text = f"{text} {extra} {frames[i % len(frames)]}"
+        else:
+            message_text = f"{text} {frames[i % len(frames)]}"
+        time.sleep(0.3)
+        i += 1
+
+def start_spinner(text):
+    global spinner_thread, spinner_running, spinner_text, spinner_extra, message_permanent
+    with spinner_lock:
+        spinner_text = text
+        spinner_extra = ""
+    message_permanent = True
+    spinner_running = True
+    spinner_thread = threading.Thread(target=_spinner_worker, daemon=True)
+    spinner_thread.start()
+
+def update_spinner(text=None, extra=None):
+    global spinner_text, spinner_extra
+    with spinner_lock:
+        if text is not None:
+            spinner_text = text
+        if extra is not None:
+            spinner_extra = extra
+
+def stop_spinner():
+    global spinner_running, message_permanent, message_text
+    spinner_running = False
+    message_permanent = False
+    message_text = None
 
 def mask_overlay():
     overlay = Image.open(MASK_PATH).convert("RGBA")
