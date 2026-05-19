@@ -16,6 +16,8 @@ Release Note:
 
     Latest updates:
 
+    - Add and rework spinner for busy message
+
     - ST7789V 1.9" now use ST7789V.py script
     - Resolution are saved in config.ini when configure screen during install
     - SSD1306, SSD1315 and SSD1309 SPI are now supported
