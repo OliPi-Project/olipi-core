@@ -3,6 +3,8 @@
 # Copyright 2025 OliPi Project
 
 SCREEN_METADATA = {
+    'SSD1305 I2C             ':  {"resolution": "128x32", "width": 128, "height": 32, "type": "i2c", "id": "SSD1305", "color": "MONO"},
+    'SSD1305 SPI             ':  {"resolution": "128x32", "width": 128, "height": 32, "type": "spi", "id": "SSD1305", "color": "MONO"},
     'SSD1306/09/15 I2C       ':  {"resolution": "128x64", "width": 128, "height": 64, "type": "i2c", "id": "SSD1306", "color": "MONO"},
     'SSD1306/09/15 SPI       ':  {"resolution": "128x64", "width": 128, "height": 64, "type": "spi2c", "id": "SSD1306", "color": "MONO"},
     'SSD1351 1.5" SPI        ':  {"resolution": "128x128", "width": 128, "height": 128, "type": "spi", "id": "SSD1351", "color": "BGR", "fbname": "ssd1351", "speed": "8000000", "txbuflen": "65536"},
