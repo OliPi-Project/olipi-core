@@ -9,7 +9,7 @@ from ..core_config import get_config
 from luma.core.interface.serial import i2c, spi
 from luma.oled.device import ssd1305
 
-CURRENT = get_config("screen", "current_screen", fallback="SSD1305", type=str).lower()
+CURRENT = get_config("screen", "current_screen", fallback="ssd1305", type=str).lower()
 TYPE = get_config("screen", "type", fallback="i2c", type=str)
 
 if TYPE.lower() == "spi2c":
@@ -21,7 +21,7 @@ else:
     I2C_ADRESS = get_config("screen", "i2c_address", fallback="0x3C", type=str)
     SERIAL = i2c(port=1, address=I2C_ADRESS)
 
-disp = SSD1305(SERIAL)
+disp = ssd1305(SERIAL)
 
 # --- Exposed attributes for core_common ---
 width = get_config("screen", "width", fallback=128, type=int)
