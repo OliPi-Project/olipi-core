@@ -52,11 +52,11 @@ SCREEN_TIMEOUT = get_config("settings", "screen_timeout", fallback=0, type=int)
 ppi = (width**2 + height**2)**0.5 / diag_inch
 BASE_PPI = 150
 def get_font(path, base_size):
-    # petits écrans → garder taille originale
+    # small screens → keep original size
     if ppi <= BASE_PPI:
         return screen.ImageFont.truetype(str(path), base_size)
 
-    # sinon → scale proportionnel au PPI
+    # otherwise → scale proportional to PPI
     scale = min((ppi / BASE_PPI) * 1.2, 1.6)
     size = max(8, int(base_size * scale))
     return screen.ImageFont.truetype(str(path), size)
