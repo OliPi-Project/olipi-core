@@ -7,7 +7,7 @@
 from PIL import Image, ImageDraw, ImageFont
 from ..core_config import get_config
 from luma.core.interface.serial import i2c, spi
-from luma.oled.device import SSD1305
+from luma.oled.device import ssd1305
 
 CURRENT = get_config("screen", "current_screen", fallback="SSD1305", type=str).lower()
 TYPE = get_config("screen", "type", fallback="i2c", type=str)
