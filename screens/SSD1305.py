@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: GPL-3.0-or-later
-# Copyright 2025 OliPi Project
+# Copyright 2026 OliPi Project
 
 # screens/SSD1305.py
 
