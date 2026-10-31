@@ -42,18 +42,20 @@ Release Note:
       - Push Button and/or Rotary Encoder (if used)
       - MPR121 capacitive touch module (if used)
 
--   **Screens supported**:
-
-    | Screen      | Resolution | Diag (") | Color      | 
-    | ----------- | ---------- | -------- | ---------- |
-    | SSD1306 I2C | 128×64     | 0.96     | Monochrome |
-    | SSD1315 I2C | 128×64     | 0.96     | Monochrome |
-    | SSD1309 I2C | 128×64     | 2.49     | Monochrome |
-    | SSD1306/09/15 SPI | 128×64 | 0.96 - 2.49  | Monochrome |
-    | SSD1351     | 128×128    | 1.5      | RGB        |
-    | ST7735R     | 128×160    | 1.77     | RGB        |
-    | ST7789 1.9" | 170×320    | 1.9      | RGB        |
-    | ST7789 2" 2.4" 2.8" | 240×320 | 2.0   | RGB      |
+  **Screens supported**:
+  
+        | Screen      | Resolution | Diag (") | Color      | 
+        | ----------- | ---------- | -------- | ---------- |
+        | SSD1305 I2C | 128×32     | 2.2      | Monochrome |
+        | SSD1305 SPI | 128×32     | 2.2      | Monochrome |
+        | SSD1306 I2C | 128×64     | 0.96     | Monochrome |
+        | SSD1315 I2C | 128×64     | 0.96     | Monochrome |
+        | SSD1309 I2C | 128×64     | 2.49     | Monochrome |
+        | SSD1306/09/15 SPI | 128×64 | 0.96 - 2.49  | Monochrome |
+        | SSD1351     | 128×128    | 1.5      | RGB        |
+        | ST7735R     | 128×160    | 1.77     | RGB        |
+        | ST7789 1.9" | 170×320    | 1.9      | RGB        |
+        | ST7789 2" 2.4" 2.8" | 240×320 | 2.0 to 2.8   | RGB      |
 
 
 ### More Documentation to come ...
