@@ -28,7 +28,6 @@ SCREEN_TYPE = get_config("screen", "current_screen", fallback="SSD1306", type=st
 screen = import_module(f"olipi_core.screens.{SCREEN_TYPE}")
 
 # --- Wrappers / Shortcuts ---
-#disp = screen.disp
 image = screen.image
 draw = screen.draw
 Image = screen.Image
@@ -61,10 +60,14 @@ def get_font(path, base_size):
     size = max(8, int(base_size * scale))
     return screen.ImageFont.truetype(str(path), size)
 
-
-font_title_menu = get_font("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 10)
-font_item_menu = get_font("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 11)
-font_message = get_font("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 11)
+if height < 64:
+    font_title_menu = get_font("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 10)
+    font_item_menu = get_font("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 11)
+    font_message = get_font("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 10)
+else:
+    font_title_menu = get_font("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 10)
+    font_item_menu = get_font("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 11)
+    font_message = get_font("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 11)
 
 def get_rpi_model():
     model_path = Path("/proc/device-tree/model")
