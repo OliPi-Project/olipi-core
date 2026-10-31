@@ -16,6 +16,7 @@ Release Note:
 
     Latest updates:
 
+    - Add support for screen SSD1305 128x32 2.2"
     - Add and rework spinner for busy message
 
     - ST7789V 1.9" now use ST7789V.py script
