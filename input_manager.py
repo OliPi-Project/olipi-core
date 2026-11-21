@@ -469,7 +469,7 @@ def start_inputs(config, process_press, msg_hook=None):
     if remote_mapping:
         print(f"Loaded {len(remote_mapping)} remote key mappings")
     else:
-        print("No valid remote mappings found, using raw keys")
+        print("No remote mappings found, using raw keys")
 
     # LIRC
     if config.getboolean("input", "use_lirc", fallback=False):
