@@ -50,6 +50,9 @@ SCREEN_TIMEOUT = get_config("settings", "screen_timeout", fallback=0, type=int)
 
 ppi = (width**2 + height**2)**0.5 / diag_inch
 BASE_PPI = 150
+if DEBUG:
+    print(f"Screen PPI: {ppi}")
+    
 def get_font(path, base_size):
     # small screens → keep original size
     if ppi <= BASE_PPI:
@@ -88,7 +91,7 @@ def detect_refresh_interval():
     elif "Raspberry Pi 4" in model:
         return 0.07
     elif "Raspberry Pi 5" in model:
-        return 0.08
+        return 0.09
     else:
         return 0.05
 REFRESH_INTERVAL = detect_refresh_interval()
