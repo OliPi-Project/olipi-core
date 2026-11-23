@@ -16,6 +16,7 @@ Release Note:
 
     Latest updates:
 
+    - Add keyboard controls
     - Add support for screen SSD1305 128x32 2.2"
     - Add and rework spinner for busy message
 
