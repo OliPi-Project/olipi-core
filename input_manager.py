@@ -6,12 +6,19 @@ import threading
 import time
 import subprocess
 import select
+import ctypes
+import ctypes.util
+import shlex
+import locale
+import os
+
 try:
     from evdev import InputDevice, list_devices, ecodes
 except ImportError:
     InputDevice = None
     list_devices = None
     ecodes = None
+
 try:
     from RPi import GPIO
     GPIO.setmode(GPIO.BCM)
@@ -19,21 +26,19 @@ try:
 except ImportError:
     GPIO = None
 
+debug = False
+
 repeat_lock = threading.Lock()
-
-# === Constants ===
-PRESS_TIMEOUT = 0.15  # default fallback
-
 repeat_threads = {}
 repeat_counts = {}
 
 remote_mapping = {}
 
-debug = False
-
 keyboard_mapping = {}
 keyboard_context = None
 keyboard_text_callback = None
+keyboard_xkb = None
+keyboard_pressed_mapping = {}
 
 # === Shared data ===
 press_data = {}
@@ -42,60 +47,38 @@ press_data = {}
 show_message = None
 press_callback = None
 
-# --- Common repeat sender for GPIO and rotary button ---
-def repeat_sender(key: str, check_fn):
+# --- Common repeat sender ---
+def repeat_sender(key: str, check_fn, repeat_interval=0.08, press_timeout=0.10):
     """
     Generic repeat sender.
     - key: logical key name (e.g. "KEY_UP")
     - check_fn: callable returning True while "pressed"
-    - REPEAT_INTERVAL: seconds between repeats
+    - repeat_interval: seconds between repeats
     """
-    REPEAT_INTERVAL = 0.08
-
+    current_thread = threading.current_thread()
     while True:
-        time.sleep(REPEAT_INTERVAL)
+        time.sleep(repeat_interval)
         with repeat_lock:
-            # Check if key still exists and is being pressed
+            # Check whether this thread is still the one associated with this key.
+            if repeat_threads.get(key) is not current_thread:
+                break
             if key not in repeat_counts or not check_fn():
                 break
             repeat_counts[key] += 1
             count = repeat_counts[key]
-
         repeat_code = f"{count:02x}"
-        process_key(key, repeat_code, 0.1)
-
-    # Cleanup thread-safe
+        process_key(key, repeat_code, press_timeout)
+    # Clean up only if the entry still belongs to this thread.
     with repeat_lock:
-        repeat_counts.pop(key, None)
-        repeat_threads.pop(key, None)
-
-# --- GPIO button event callback ---
-def gpio_event(button_pressed, key):
-    """
-    GPIO callback: start a repeat thread that polls GPIO.input(button_pressed).
-    Existing semantics preserved: first press -> process_key(...,"00")
-    """
-    if GPIO.input(button_pressed) == GPIO.LOW:
-        if key not in repeat_threads:
-            repeat_counts[key] = 0
-            process_key(key, "00", 0.1)  # first press
-            # pass a check_fn that reads the GPIO pin
-            check_fn = lambda bp=button_pressed: GPIO.input(bp) == GPIO.LOW
-            t = threading.Thread(target=repeat_sender, args=(key, check_fn), daemon=True)
-            repeat_threads[key] = t
-            t.start()
-    else:
-        # release: ensure we stop any repeat
-        repeat_counts.pop(key, None)
-        repeat_threads.pop(key, None)
+        if repeat_threads.get(key) is current_thread:
+            repeat_threads.pop(key, None)
+            repeat_counts.pop(key, None)
 
 # === Key processing + remapping ===
-def process_key(key, repeat_code, PRESS_TIMEOUT=PRESS_TIMEOUT):
+def process_key(key, repeat_code, press_timeout=0.10):
     global press_data
-
     # apply remapping if available
     mapped_key = remote_mapping.get(key, key)
-
     try:
         rep = int(repeat_code, 16)
     except Exception as e:
@@ -103,30 +86,24 @@ def process_key(key, repeat_code, PRESS_TIMEOUT=PRESS_TIMEOUT):
             show_message(f"error process_key: {e}")
         print("error process_key:", e)
         return
-
     if rep == 0:
         if mapped_key not in press_data:
             press_data[mapped_key] = {"max_repeat_code": 0, "timer": None}
         else:
             press_data[mapped_key]["max_repeat_code"] = 0
-
         if press_data[mapped_key]["timer"] is not None:
             press_data[mapped_key]["timer"].cancel()
-
-        t = threading.Timer(PRESS_TIMEOUT, lambda: press_callback(mapped_key))
+        t = threading.Timer(press_timeout, lambda: press_callback(mapped_key))
         press_data[mapped_key]["timer"] = t
         t.start()
         return
-
     if mapped_key not in press_data:
         press_data[mapped_key] = {"max_repeat_code": rep, "timer": None}
     else:
         press_data[mapped_key]["max_repeat_code"] = max(press_data[mapped_key]["max_repeat_code"], rep)
-
     if press_data[mapped_key]["timer"] is not None:
         press_data[mapped_key]["timer"].cancel()
-
-    t = threading.Timer(PRESS_TIMEOUT, lambda: press_callback(mapped_key))
+    t = threading.Timer(press_timeout, lambda: press_callback(mapped_key))
     press_data[mapped_key]["timer"] = t
     t.start()
 
@@ -134,161 +111,319 @@ def process_key(key, repeat_code, PRESS_TIMEOUT=PRESS_TIMEOUT):
 # Keyboard / evdev
 # ============================================================
 
+class KeyboardXKB:
+    """Conversion of evdev events to characters using libxkbcommon."""
+    def __init__(self, config_file="/etc/default/keyboard"):
+        library = ctypes.util.find_library("xkbcommon")
+        if not library:
+            raise RuntimeError("libxkbcommon not found")
+        self.lib = ctypes.CDLL(library)
+        class RuleNames(ctypes.Structure):
+            _fields_ = [
+                ("rules", ctypes.c_char_p),
+                ("model", ctypes.c_char_p),
+                ("layout", ctypes.c_char_p),
+                ("variant", ctypes.c_char_p),
+                ("options", ctypes.c_char_p),
+            ]
+        self._bind_functions()
+        settings = self._read_keyboard_config(config_file)
+        names = RuleNames(
+            b"evdev",
+            settings["model"].encode(),
+            settings["layout"].encode(),
+            settings["variant"].encode(),
+            settings["options"].encode(),
+        )
+        self.context = self.lib.xkb_context_new(0)
+        if not self.context:
+            raise RuntimeError("xkb_context_new failed")
+        self.keymap = self.lib.xkb_keymap_new_from_names(
+            self.context, ctypes.byref(names), 0
+        )
+        if not self.keymap:
+            raise RuntimeError("Unable to create XKB keymap")
+        self.state = self.lib.xkb_state_new(self.keymap)
+        if not self.state:
+            raise RuntimeError("Unable to create XKB state")
+        # Compose permet de gérer les accents morts (ex. ^ puis e).
+        current_locale = locale.setlocale(locale.LC_CTYPE)
+        self.compose_table = self.lib.xkb_compose_table_new_from_locale(
+            self.context, current_locale.encode(), 0
+        )
+        self.compose_state = None
+        if self.compose_table:
+            self.compose_state = self.lib.xkb_compose_state_new(
+                self.compose_table, 0
+            )
+        print(
+            f"[keyboard] XKB layout={settings['layout']} "
+            f"model={settings['model']} "
+            f"variant={settings['variant'] or '-'}"
+        )
+
+    def _bind_functions(self):
+        lib = self.lib
+        lib.xkb_context_new.argtypes = [ctypes.c_int]
+        lib.xkb_context_new.restype = ctypes.c_void_p
+        lib.xkb_keymap_new_from_names.argtypes = [
+            ctypes.c_void_p, ctypes.c_void_p, ctypes.c_int
+        ]
+        lib.xkb_keymap_new_from_names.restype = ctypes.c_void_p
+        lib.xkb_state_new.argtypes = [ctypes.c_void_p]
+        lib.xkb_state_new.restype = ctypes.c_void_p
+        lib.xkb_state_update_key.argtypes = [
+            ctypes.c_void_p, ctypes.c_uint, ctypes.c_int
+        ]
+        lib.xkb_state_update_key.restype = ctypes.c_int
+        lib.xkb_state_key_get_utf8.argtypes = [
+            ctypes.c_void_p, ctypes.c_uint,
+            ctypes.c_char_p, ctypes.c_size_t
+        ]
+        lib.xkb_state_key_get_utf8.restype = ctypes.c_int
+        lib.xkb_state_key_get_one_sym.argtypes = [
+            ctypes.c_void_p, ctypes.c_uint
+        ]
+        lib.xkb_state_key_get_one_sym.restype = ctypes.c_uint
+        lib.xkb_compose_table_new_from_locale.argtypes = [
+            ctypes.c_void_p, ctypes.c_char_p, ctypes.c_int
+        ]
+        lib.xkb_compose_table_new_from_locale.restype = ctypes.c_void_p
+        lib.xkb_compose_state_new.argtypes = [
+            ctypes.c_void_p, ctypes.c_int
+        ]
+        lib.xkb_compose_state_new.restype = ctypes.c_void_p
+        lib.xkb_compose_state_feed.argtypes = [
+            ctypes.c_void_p, ctypes.c_uint
+        ]
+        lib.xkb_compose_state_feed.restype = ctypes.c_int
+        lib.xkb_compose_state_get_status.argtypes = [
+            ctypes.c_void_p
+        ]
+        lib.xkb_compose_state_get_status.restype = ctypes.c_int
+        lib.xkb_compose_state_get_utf8.argtypes = [
+            ctypes.c_void_p, ctypes.c_char_p, ctypes.c_size_t
+        ]
+        lib.xkb_compose_state_get_utf8.restype = ctypes.c_int
+        lib.xkb_compose_state_reset.argtypes = [ctypes.c_void_p]
+        lib.xkb_compose_state_reset.restype = None
+        lib.xkb_keymap_mod_get_index.argtypes = [
+            ctypes.c_void_p, ctypes.c_char_p
+        ]
+        lib.xkb_keymap_mod_get_index.restype = ctypes.c_uint
+        lib.xkb_state_update_mask.argtypes = [
+            ctypes.c_void_p,
+            ctypes.c_uint, ctypes.c_uint, ctypes.c_uint,
+            ctypes.c_uint, ctypes.c_uint, ctypes.c_uint,
+        ]
+        lib.xkb_state_update_mask.restype = ctypes.c_uint
+
+    @staticmethod
+    def _read_keyboard_config(path):
+        settings = {
+            "model": "pc105",
+            "layout": "us",
+            "variant": "",
+            "options": "",
+        }
+        try:
+            with open(path, encoding="utf-8") as f:
+                for line in f:
+                    line = line.strip()
+                    if not line or line.startswith("#") or "=" not in line:
+                        continue
+                    key, value = line.split("=", 1)
+                    key = key.strip()
+                    if key not in ("XKBMODEL", "XKBLAYOUT",
+                                   "XKBVARIANT", "XKBOPTIONS"):
+                        continue
+                    values = shlex.split(value, comments=True)
+                    value = values[0] if values else ""
+                    settings[key[3:].lower()] = value
+        except OSError as e:
+            print(f"[keyboard] cannot read {path}: {e}")
+        return settings
+
+    def set_numlock(self, enabled):
+        """Synchronizes the initial state of NumLock with the kernel."""
+        mod_index = self.lib.xkb_keymap_mod_get_index(
+            self.keymap, b"Mod2"
+        )
+        if mod_index == 0xFFFFFFFF:
+            print("[keyboard] XKB NumLock modifier not found")
+            return
+        locked_mods = (1 << mod_index) if enabled else 0
+        self.lib.xkb_state_update_mask(
+            self.state,
+            0,              # depressed modifiers
+            0,              # latched modifiers
+            locked_mods,    # locked modifiers
+            0, 0, 0         # layouts
+        )
+        print(f"[keyboard] NumLock={'ON' if enabled else 'OFF'}")
+
+    def reset_compose(self):
+        """Cancels any composition currently in progress."""
+        if self.compose_state:
+            self.lib.xkb_compose_state_reset(self.compose_state)
+
+    def handle_event(self, code, value):
+        """
+        Updates the XKB state.
+        Returns a single character only for a PRESS event.
+        REPEAT events are ignored.
+        """
+        if value == 2:
+            return None
+        if value not in (0, 1):
+            return None
+        keycode = code + 8
+        self.lib.xkb_state_update_key(
+            self.state, keycode, 1 if value == 1 else 0
+        )
+        if value != 1:
+            return None
+        keysym = self.lib.xkb_state_key_get_one_sym(
+            self.state, keycode
+        )
+        # Managing dead key combinations.
+        if self.compose_state and keysym:
+            result = self.lib.xkb_compose_state_feed(
+                self.compose_state, keysym
+            )
+            if result == 1:
+                status = self.lib.xkb_compose_state_get_status(
+                    self.compose_state
+                )
+                if status == 1:  # COMPOSING
+                    return None
+                if status == 2:  # COMPOSED
+                    buf = ctypes.create_string_buffer(64)
+                    size = self.lib.xkb_compose_state_get_utf8(
+                        self.compose_state, buf, 64
+                    )
+                    self.lib.xkb_compose_state_reset(
+                        self.compose_state
+                    )
+                    return buf.value.decode("utf-8") if size > 0 else None
+                if status == 3:  # CANCELLED
+                    self.lib.xkb_compose_state_reset(
+                        self.compose_state
+                    )
+                    return None
+        buf = ctypes.create_string_buffer(64)
+        size = self.lib.xkb_state_key_get_utf8(
+            self.state, keycode, buf, 64
+        )
+        return buf.value.decode("utf-8") if size > 0 else None
+
+KEYBOARD_LETTER_KEYS = {f"KEY_{letter}" for letter in "ABCDEFGHIJKLMNOPQRSTUVWXYZ"}
+
 KEYBOARD_DEFAULT_MAPPING = {
-    "KEY_UP": ["KEY_UP", "KP8"],
-    "KEY_DOWN": ["KEY_DOWN", "KP2"],
-    "KEY_LEFT": ["KEY_LEFT", "KP4"],
-    "KEY_RIGHT": ["KEY_RIGHT", "KP6"],
-    "KEY_OK": ["KEY_ENTER", "KPENTER"],
-    "KEY_BACK": ["KEY_BACKSPACE"],
-    "KEY_CHANNELUP": ["KEY_PAGEUP", "KP9"],
-    "KEY_CHANNELDOWN": ["KEY_PAGEDOWN", "KP3"],
-    "KEY_PLAY": ["KEY_PLAYPAUSE", "KEY_P"],
-    "KEY_INFO": ["KEY_I", "KEY_INFO"],
-    "KEY_STOP": ["KEY_ESC", "KEY_S"],
-    "KEY_NEXT": ["KEY_NEXTSONG"],
-    "KEY_PREVIOUS": ["KEY_PREVIOUSSONG"],
-    "KEY_FORWARD": ["KEY_F"],
-    "KEY_REWIND": ["KEY_R"],
-    "KEY_VOLUMEUP": ["KEY_VOLUMEUP"],
-    "KEY_VOLUMEDOWN": ["KEY_VOLUMEDOWN"],
-    "KEY_MUTE": ["KEY_MUTE"],
-    "KEY_POWER": ["KEY_POWER"],
+    "KEY_UP": ["KEY_UP", "KEY_KP8"],
+    "KEY_DOWN": ["KEY_DOWN", "KEY_KP2"],
+    "KEY_LEFT": ["KEY_LEFT", "KEY_KP4"],
+    "KEY_RIGHT": ["KEY_RIGHT", "KEY_KP6"],
+    "KEY_OK": ["KEY_ENTER", "KEY_KPENTER"],
+    "KEY_BACK": ["KEY_HOME", "KEY_LEFTMETA", "KEY_TAB"],
+    "KEY_CHANNELUP": ["KEY_PAGEUP", "KEY_KP9"],
+    "KEY_CHANNELDOWN": ["KEY_PAGEDOWN", "KEY_KP3"],
+    "KEY_PLAY": ["KEY_PLAYPAUSE", "KEY_SPACE"],
+    "KEY_INFO": ["KEY_INFO", "KEY_I"],
+    "KEY_STOP": ["KEY_STOP", "KEY_STOPCD", "KEY_X", "KEY_S"],
+    "KEY_NEXT": ["KEY_NEXTSONG", "KEY_N"],
+    "KEY_PREVIOUS": ["KEY_PREVIOUSSONG", "KEY_P"],
+    "KEY_FORWARD": ["KEY_FORWARD", "KEY_F"],
+    "KEY_REWIND": ["KEY_REWIND", "KEY_R"],
+    "KEY_VOLUMEUP": ["KEY_VOLUMEUP", "KEY_KPPLUS"],
+    "KEY_VOLUMEDOWN": ["KEY_VOLUMEDOWN", "KEY_KPMINUS"],
+    "KEY_MUTE": ["KEY_MUTE", "KEY_M"],
+    "KEY_POWER": ["KEY_POWER", "KEY_SLEEP", "KEY_END"],
 }
 
-
-# Touches de contrôle qui restent disponibles en mode texte.
-# Elles ne passent PAS par keyboard_mapping.
-KEYBOARD_TEXT_CONTROL_KEYS = {
-    "KEY_LEFT": "KEY_LEFT",
-    "KEY_RIGHT": "KEY_RIGHT",
-    "KEY_UP": "KEY_UP",
-    "KEY_DOWN": "KEY_DOWN",
-    "KEY_ENTER": "KEY_ENTER",
-    "KPENTER": "KEY_ENTER",
-    "KEY_ESC": "KEY_ESC",
+KEYBOARD_MODIFIER_KEYS = {
+    "KEY_LEFTSHIFT",
+    "KEY_RIGHTSHIFT",
+    "KEY_LEFTCTRL",
+    "KEY_RIGHTCTRL",
+    "KEY_LEFTALT",
+    "KEY_RIGHTALT",
+    "KEY_LEFTMETA",
+    "KEY_RIGHTMETA",
+    "KEY_CAPSLOCK",
+    "KEY_NUMLOCK",
+    "KEY_SCROLLLOCK",
 }
 
-
-# Correspondance minimale pour la saisie texte.
-# Les touches alphanumériques sont complétées automatiquement.
-KEYBOARD_TEXT_KEYS = {
-    "KEY_SPACE": " ",
-    "KEY_TAB": "\t",
-    "KEY_MINUS": "-",
-    "KEY_EQUAL": "=",
-    "KEY_LEFTBRACE": "[",
-    "KEY_RIGHTBRACE": "]",
-    "KEY_BACKSLASH": "\\",
-    "KEY_SEMICOLON": ";",
-    "KEY_APOSTROPHE": "'",
-    "KEY_GRAVE": "`",
-    "KEY_COMMA": ",",
-    "KEY_DOT": ".",
-    "KEY_SLASH": "/",
+KEYBOARD_TEXT_KEY_NAMES = {
+    "KEY_SPACE",
+    "KEY_MINUS",
+    "KEY_EQUAL",
+    "KEY_LEFTBRACE",
+    "KEY_RIGHTBRACE",
+    "KEY_BACKSLASH",
+    "KEY_SEMICOLON",
+    "KEY_APOSTROPHE",
+    "KEY_GRAVE",
+    "KEY_COMMA",
+    "KEY_DOT",
+    "KEY_SLASH",
 }
-
-
 def get_keyboard_key_name(code):
-    """
-    Retourne le nom evdev d'une touche en évitant les alias
-    sentinelles comme KEY_MIN_INTERESTING.
-    """
+    """Returns the evdev name of a key, avoiding sentinel aliases such as KEY_MIN_INTERESTING."""
     names = ecodes.KEY.get(code)
-
     if not isinstance(names, (tuple, list)):
         names = (names,)
-
     for name in names:
         if isinstance(name, str) and name.startswith("KEY_"):
             if name != "KEY_MIN_INTERESTING":
                 return name
-
     return str(code)
-
 
 def load_keyboard_mapping(config):
     """
-    Charge le mapping clavier.
-
-    La configuration utilise le même principe que remote_mapping,
-    mais avec plusieurs touches physiques possibles :
-
-        KEY_UP = KEY_UP, KP8
-        KEY_OK = KEY_ENTER, KPENTER
-
-    Le dictionnaire interne est inversé :
-
-        KEY_UP  -> KEY_UP
-        KP8     -> KEY_UP
+    Same principle as remote_mapping, but with multiple possible physical keys:
+        KEY_UP = KEY_UP, KEY_KP8
+        KEY_OK = KEY_ENTER, KEY_KPENTER
     """
     global keyboard_mapping
-
     keyboard_mapping = {}
-
-    mapping = {
-        action: list(keys)
-        for action, keys in KEYBOARD_DEFAULT_MAPPING.items()
-    }
-
+    mapping = {action: list(keys) for action, keys in KEYBOARD_DEFAULT_MAPPING.items()}
     if config.has_section("keyboard_mapping"):
         for action, value in config.items("keyboard_mapping"):
             action = action.strip().upper()
-
             if not action.startswith("KEY_"):
                 continue
-
             keys = [
                 key.strip().upper()
                 for key in value.split(",")
                 if key.strip()
             ]
-
             if keys:
                 mapping[action] = keys
-
     for action, physical_keys in mapping.items():
         for physical_key in physical_keys:
             keyboard_mapping[physical_key] = action
-
     if debug:
         print("[keyboard] mapping:")
         for action, physical_keys in mapping.items():
             print(f"  {action:<18} = {', '.join(physical_keys)}")
-
     print(f"[keyboard] loaded {len(keyboard_mapping)} key mappings")
-
 
 def set_keyboard_context(context, text_callback=None):
     """
-    Change le contexte de traitement du clavier.
-
-    context=None :
-        fonctionnement normal avec keyboard_mapping.
-
-    context="text" :
-        aucune conversion via keyboard_mapping et aucun raccourci
-        n'est utilisé. Les caractères sont envoyés à text_callback.
-
-    text_callback reçoit :
-        - un caractère pour une touche texte
-        - "BACKSPACE" pour Backspace
-        - "ENTER" pour Enter
-        - "ESC" pour Escape
-        - KEY_LEFT / KEY_RIGHT / KEY_UP / KEY_DOWN pour les directions
+    context=None : Normal operation with keyboard_mapping.
+    context="text": No conversion via `keyboard_mapping` and no shortcuts are used. The characters are sent to `text_callback`.
     """
     global keyboard_context, keyboard_text_callback
-
     keyboard_context = context
     keyboard_text_callback = text_callback
-
     if debug:
         print(f"[keyboard] context -> {context}")
 
-
 def keyboard_send_text(value):
     """
-    Envoie une valeur au callback texte courant.
+    Sends a value to the current text callback.
     """
     if keyboard_text_callback is not None:
         try:
@@ -296,210 +431,189 @@ def keyboard_send_text(value):
         except Exception as e:
             print(f"[keyboard] text callback error: {e}")
 
-
-def keyboard_translate_text_key(key):
+def keyboard_handle_event(key, value, code=None):
     """
-    Convertit un nom de touche evdev en caractère ou contrôle texte.
-
-    Cette première version couvre les caractères courants.
-    La gestion de Shift/CapsLock est traitée séparément dans le listener.
-    """
-    if key in KEYBOARD_TEXT_KEYS:
-        return KEYBOARD_TEXT_KEYS[key]
-
-    # Lettres
-    if key.startswith("KEY_") and len(key) == 5:
-        letter = key[-1]
-        if "A" <= letter <= "Z":
-            return letter.lower()
-
-    # Chiffres du clavier principal
-    if key.startswith("KEY_") and len(key) == 5:
-        digit = key[-1]
-        if digit in "0123456789":
-            return digit
-
-    # Pavé numérique
-    keypad_digits = {
-        "KP0": "0",
-        "KP1": "1",
-        "KP2": "2",
-        "KP3": "3",
-        "KP4": "4",
-        "KP5": "5",
-        "KP6": "6",
-        "KP7": "7",
-        "KP8": "8",
-        "KP9": "9",
-    }
-
-    if key in keypad_digits:
-        return keypad_digits[key]
-
-    if key == "KEY_BACKSPACE":
-        return "BACKSPACE"
-
-    if key == "KEY_ENTER" or key == "KPENTER":
-        return "ENTER"
-
-    if key == "KEY_ESC":
-        return "ESC"
-
-    return None
-
-
-def keyboard_handle_event(key, value):
-    """
-    Traite un événement EV_KEY.
-
+    Handles an EV_KEY event.
     value :
         0 = release
         1 = press
         2 = repeat
     """
+    global keyboard_pressed_mapping
+    translated = None
+    # XKB continuously monitors the status of keys and modifiers.
+    if keyboard_xkb is not None and code is not None:
+        translated = keyboard_xkb.handle_event(code, value)
+
     # --------------------------------------------------------
-    # Mode texte
+    # Release: Use the memorized mapping as a guide.
     # --------------------------------------------------------
-    if keyboard_context == "text":
-        # Les répétitions peuvent être ignorées pour le moment.
-        # On pourra les gérer ensuite si nécessaire.
-        if value != 1:
-            return
-
-        # Contrôles de navigation : ils restent des contrôles,
-        # mais ne sont PAS transformés via keyboard_mapping.
-        if key in KEYBOARD_TEXT_CONTROL_KEYS:
-            keyboard_send_text(KEYBOARD_TEXT_CONTROL_KEYS[key])
-            return
-
-        text = keyboard_translate_text_key(key)
-
-        if text is not None:
-            keyboard_send_text(text)
-
+    if value == 0:
+        mapped_key = keyboard_pressed_mapping.pop(code, None)
+        if mapped_key:
+            with repeat_lock:
+                repeat_counts.pop(mapped_key, None)
+                repeat_threads.pop(mapped_key, None)
+        return
+    # Modifiers are tracked by XKB but are not transmitted as commands.
+    if key in KEYBOARD_MODIFIER_KEYS:
+        return
+    # Physical repetitions are ignored.
+    if value != 1:
         return
 
+    # --------------------------------------------------------
+    # Mode text
+    # --------------------------------------------------------
+    if keyboard_context == "text":
+        if key in ("KEY_ESC", "KEY_BACKSPACE"):
+            keyboard_send_text(key)
+            return # not mapped
+
+        if key in ("KEY_ENTER", "KEY_KPENTER"):
+            pass  # Continue to keyboard_mapping
+        elif translated:
+            keyboard_send_text(translated)
+            return # not mapped
 
     # --------------------------------------------------------
     # Mode normal
     # --------------------------------------------------------
-
-    mapped_key = keyboard_mapping.get(key)
-
-    if not mapped_key:
-        return
-
-    if value == 1:
-        # Premier appui physique
-        with repeat_lock:
-            if mapped_key in repeat_threads:
-                return
-
-            repeat_counts[mapped_key] = 0
-
-        # Premier code : 00
-        process_key(mapped_key, "00", 0.1)
-
-        # Répétition générée par repeat_sender
-        check_fn = lambda k=mapped_key: k in repeat_counts
-
-        t = threading.Thread(
-            target=repeat_sender,
-            args=(mapped_key, check_fn),
-            daemon=True
-        )
-
-        with repeat_lock:
-            repeat_threads[mapped_key] = t
-
-        t.start()
-
-    elif value == 0:
-        # Relâchement physique : arrêt de la répétition
-        with repeat_lock:
-            repeat_counts.pop(mapped_key, None)
-            repeat_threads.pop(mapped_key, None)
-
-    # value == 2 ignoré :
-    # la répétition est entièrement gérée par repeat_sender.
+    # Use the AZERTY, QWERTY, etc., keyboard layout for letters
+    logical_key = key
+    if key in KEYBOARD_LETTER_KEYS:
+        if translated and len(translated) == 1 and translated.isalpha():
+            logical_key = f"KEY_{translated.upper()}"
+    # Use the configured mapping if available; otherwise, pass the logical key directly.
+    mapped_key = keyboard_mapping.get(logical_key, logical_key)
+    if code is not None:
+        keyboard_pressed_mapping[code] = mapped_key
+    # First physical contact.
+    with repeat_lock:
+        if mapped_key in repeat_threads:
+            return
+        repeat_counts[mapped_key] = 0
+    process_key(mapped_key, "00", 0.10)
+    check_fn = lambda k=mapped_key: k in repeat_counts
+    t = threading.Thread( target=repeat_sender, args=(mapped_key, check_fn, 0.08, 0.10), daemon=True)
+    with repeat_lock:
+        repeat_threads[mapped_key] = t
+    t.start()
 
 def keyboard_listener(config):
     """
-    Écoute les périphériques Linux EV_KEY via evdev.
-
-    Seuls les périphériques exposant au moins une touche connue
-    du mapping clavier ou une touche texte sont retenus.
+    Listen for Linux EV_KEY devices via evdev.
+    Detects compatible keyboards and manages their hot-plug connection and disconnection.
     """
     if InputDevice is None:
         print("[keyboard] evdev not available")
         return
-
     load_keyboard_mapping(config)
-
-    devices = []
-
-    # Touches susceptibles d'intéresser le clavier en mode normal.
+    global keyboard_xkb
+    try:
+        keyboard_xkb = KeyboardXKB()
+    except Exception as e:
+        keyboard_xkb = None
+        print(f"[keyboard] XKB initialization failed: {e}")
     relevant_keys = set(keyboard_mapping.keys())
+    relevant_keys.update(KEYBOARD_TEXT_KEY_NAMES)
+    relevant_keys.update(KEYBOARD_LETTER_KEYS)
+    # Devices to ignore.
+    ignored_devices = ("gpio", "vc4-hdmi")
+    devices = {}
+    numlock_synced = False
+    # Keys held down by device.
+    pressed_by_device = {}
+    # Number of devices that support each EV_KEY code.
+    pressed_counts = {}
 
-    # Touches nécessaires au mode texte.
-    relevant_keys.update(KEYBOARD_TEXT_KEYS.keys())
-    relevant_keys.update(KEYBOARD_TEXT_CONTROL_KEYS.keys())
-    relevant_keys.update({
-        "KEY_BACKSPACE",
-        "KEY_ENTER",
-        "KPENTER",
-        "KEY_SPACE",
-    })
+    def release_device(dev):
+        """Releases any keys still held down by a device."""
+        path = dev.path
+        for code in pressed_by_device.pop(path, set()):
+            count = pressed_counts.get(code, 0) - 1
+            if count <= 0:
+                pressed_counts.pop(code, None)
+                keyboard_handle_event(get_keyboard_key_name(code), 0, code)
+            else:
+                pressed_counts[code] = count
+        # Cancels any composition currently in progress.
+        if keyboard_xkb is not None:
+            keyboard_xkb.reset_compose()
 
     try:
-        for path in list_devices():
-            try:
-                dev = InputDevice(path)
-
-                capabilities = dev.capabilities()
-                keys = capabilities.get(ecodes.EV_KEY, [])
-
-                device_keys = {
-                    get_keyboard_key_name(code)
-                    for code in keys
-                }
-
-                if not device_keys.intersection(relevant_keys):
-                    dev.close()
-                    continue
-
-                devices.append(dev)
-
-            except Exception as e:
-                print(f"[keyboard] cannot open {path}: {e}")
-
-        if not devices:
-            print("[keyboard] no compatible input device found")
-            return
-
-        print("[keyboard] listening on:")
-        for dev in devices:
-            print(f"  {dev.path}: {dev.name}")
-
         while True:
-            ready, _, _ = select.select(
-                [dev.fd for dev in devices],
-                [],
-                [],
-                0.5
-            )
+            # Search for new devices.
+            for path in list_devices():
+                if path in devices:
+                    continue
+                try:
+                    dev = InputDevice(path)
+                    identity = " ".join((
+                        dev.name or "",
+                        dev.phys or "",
+                        dev.path or "",
+                    )).lower()
+                    if any(name in identity for name in ignored_devices):
+                        dev.close()
+                        continue
+                    capabilities = dev.capabilities()
+                    keys = capabilities.get(ecodes.EV_KEY, [])
+                    device_keys = {get_keyboard_key_name(code) for code in keys}
+                    if not device_keys.intersection(relevant_keys):
+                        dev.close()
+                        continue
+                    devices[path] = dev
+                    print(
+                        f"[keyboard] device connected: "
+                        f"{dev.path}: {dev.name}"
+                    )
+                    # Initial NumLock synchronization.
+                    if (not numlock_synced and "KEY_NUMLOCK" in device_keys):
+                        led_caps = capabilities.get(ecodes.EV_LED, [])
+                        if ecodes.LED_NUML in led_caps:
+                            try:
+                                numlock_active = (ecodes.LED_NUML in dev.leds())
+                                if keyboard_xkb is not None:
+                                    keyboard_xkb.set_numlock(numlock_active)
+                                numlock_synced = True
+                            except OSError:
+                                pass
+                except Exception as e:
+                    print(f"[keyboard] cannot open {path}: {e}")
 
-            for dev in devices:
+            # Waiting for events.
+            active_devices = tuple(devices.values())
+            try:
+                ready, _, _ = select.select(
+                    [dev.fd for dev in active_devices],
+                    [],
+                    [],
+                    0.5
+                )
+            except (OSError, ValueError):
+                # A device may have been removed while `select()` was being prepared.
+                for dev in active_devices:
+                    try:
+                        os.fstat(dev.fd)
+                    except OSError:
+                        print(f"[keyboard] device disconnected: {dev.path}")
+                        release_device(dev)
+                        devices.pop(dev.path, None)
+                        try:
+                            dev.close()
+                        except OSError:
+                            pass
+                continue
+
+            for dev in active_devices:
                 if dev.fd not in ready:
                     continue
-
                 try:
                     for event in dev.read():
                         if event.type != ecodes.EV_KEY:
                             continue
-
                         key = get_keyboard_key_name(event.code)
-
                         if debug:
                             state = {
                                 0: "RELEASE",
@@ -510,22 +624,43 @@ def keyboard_listener(config):
                                 f"[keyboard] {dev.name}: "
                                 f"{key} {state}"
                             )
-
-                        keyboard_handle_event(key, event.value)
-
+                        code = event.code
+                        pressed = pressed_by_device.setdefault(dev.path, set())
+                        if event.value == 1:
+                            if code not in pressed:
+                                pressed.add(code)
+                                count = pressed_counts.get(code, 0) + 1
+                                pressed_counts[code] = count
+                                # Only one XKB press is recognized, even if multiple keyboards hold down the same key at the same time.
+                                if count == 1:
+                                    keyboard_handle_event(key, 1, code)
+                        elif event.value == 0:
+                            if code in pressed:
+                                pressed.remove(code)
+                                count = pressed_counts.get(code, 0) - 1
+                                if count <= 0:
+                                    pressed_counts.pop(code, None)
+                                    keyboard_handle_event(key, 0, code)
+                                else:
+                                    pressed_counts[code] = count
+                except BlockingIOError:
+                    continue
                 except OSError:
-                    # Périphérique débranché.
                     print(f"[keyboard] device disconnected: {dev.path}")
-
+                    release_device(dev)
+                    devices.pop(dev.path, None)
+                    try:
+                        dev.close()
+                    except OSError:
+                        pass
     except KeyboardInterrupt:
         pass
-
     except Exception as e:
         print(f"[keyboard] listener error: {e}")
-
     finally:
-        for dev in devices:
+        for dev in devices.values():
             try:
+                release_device(dev)
                 dev.close()
             except Exception:
                 pass
@@ -571,7 +706,6 @@ def mpr121_listener(process_key, config):
     PAD_KEY_MAPPING = {}
     pad_touch_thresholds = {}
     pad_release_thresholds = {}
-
     if config.has_section("mpr121_pads"):
         for key, value in config.items("mpr121_pads"):
             if not key.lower().startswith("pad"):
@@ -718,6 +852,8 @@ def mpr121_listener(process_key, config):
 
     running = True
     gesture_active = config.getboolean("mpr121", "use_gesture", fallback=False)
+    swipe = None
+    rotation = None
 
     while running:
         try:
@@ -725,6 +861,7 @@ def mpr121_listener(process_key, config):
                 sensor.update_all()
                 touched = {i for i in range(5) if sensor.is_new_touch(i)}
                 released = {i for i in range(5) if sensor.is_new_release(i)}
+
 
                 # --- 1. Handle new touches (gesture / single key detection for the first 5 pads) ---
                 if gesture_active and touched:
@@ -830,7 +967,7 @@ def rotary_listener(pin_a, pin_b, process_key, config=None):
         if a_state != last_state_a:
             now = time.time()
             if (now - last_emit) * 1000 < min_tick_ms / 2:
-                # Ignore très courtes transitions (rebonds)
+                # Ignores very short transitions (bounces)
                 return
 
             direction = +1 if b_state != a_state else -1
@@ -856,6 +993,26 @@ def rotary_listener(pin_a, pin_b, process_key, config=None):
     except KeyboardInterrupt:
         GPIO.remove_event_detect(pin_a)
         GPIO.remove_event_detect(pin_b)
+
+# --- GPIO button event callback ---
+def gpio_event(button_pressed, key):
+    """
+    GPIO callback: start a repeat thread that polls GPIO.input(button_pressed).
+    """
+    if GPIO.input(button_pressed) == GPIO.LOW:
+        with repeat_lock:
+            if key in repeat_threads:
+                return
+            repeat_counts[key] = 0
+            process_key(key, "00", 0.1)
+            check_fn = lambda bp=button_pressed: GPIO.input(bp) == GPIO.LOW
+            t = threading.Thread(target=repeat_sender, args=(key, check_fn), daemon=True)
+            repeat_threads[key] = t
+            t.start()
+    else:
+        with repeat_lock:
+            repeat_counts.pop(key, None)
+            repeat_threads.pop(key, None)
 
 # === Main entrance ===
 def start_inputs(config, process_press, msg_hook=None):
