@@ -36,7 +36,6 @@ remote_mapping = {}
 
 keyboard_mapping = {}
 keyboard_context = None
-keyboard_text_callback = None
 keyboard_xkb = None
 keyboard_pressed_mapping = {}
 
@@ -77,8 +76,6 @@ def repeat_sender(key: str, check_fn, repeat_interval=0.08, press_timeout=0.10):
 # === Key processing + remapping ===
 def process_key(key, repeat_code, press_timeout=0.10):
     global press_data
-    # apply remapping if available
-    mapped_key = remote_mapping.get(key, key)
     try:
         rep = int(repeat_code, 16)
     except Exception as e:
@@ -87,24 +84,24 @@ def process_key(key, repeat_code, press_timeout=0.10):
         print("error process_key:", e)
         return
     if rep == 0:
-        if mapped_key not in press_data:
-            press_data[mapped_key] = {"max_repeat_code": 0, "timer": None}
+        if key not in press_data:
+            press_data[key] = {"max_repeat_code": 0, "timer": None}
         else:
-            press_data[mapped_key]["max_repeat_code"] = 0
-        if press_data[mapped_key]["timer"] is not None:
-            press_data[mapped_key]["timer"].cancel()
-        t = threading.Timer(press_timeout, lambda: press_callback(mapped_key))
-        press_data[mapped_key]["timer"] = t
+            press_data[key]["max_repeat_code"] = 0
+        if press_data[key]["timer"] is not None:
+            press_data[key]["timer"].cancel()
+        t = threading.Timer(press_timeout, lambda: press_callback(key))
+        press_data[key]["timer"] = t
         t.start()
         return
-    if mapped_key not in press_data:
-        press_data[mapped_key] = {"max_repeat_code": rep, "timer": None}
+    if key not in press_data:
+        press_data[key] = {"max_repeat_code": rep, "timer": None}
     else:
-        press_data[mapped_key]["max_repeat_code"] = max(press_data[mapped_key]["max_repeat_code"], rep)
-    if press_data[mapped_key]["timer"] is not None:
-        press_data[mapped_key]["timer"].cancel()
-    t = threading.Timer(press_timeout, lambda: press_callback(mapped_key))
-    press_data[mapped_key]["timer"] = t
+        press_data[key]["max_repeat_code"] = max(press_data[key]["max_repeat_code"], rep)
+    if press_data[key]["timer"] is not None:
+        press_data[key]["timer"].cancel()
+    t = threading.Timer(press_timeout, lambda: press_callback(key))
+    press_data[key]["timer"] = t
     t.start()
 
 # ============================================================
@@ -389,8 +386,8 @@ def load_keyboard_mapping(config):
     global keyboard_mapping
     keyboard_mapping = {}
     mapping = {action: list(keys) for action, keys in KEYBOARD_DEFAULT_MAPPING.items()}
-    if config.has_section("keyboard_mapping"):
-        for action, value in config.items("keyboard_mapping"):
+    if config.has_section("keyboard"):
+        for action, value in config.items("keyboard"):
             action = action.strip().upper()
             if not action.startswith("KEY_"):
                 continue
@@ -410,26 +407,15 @@ def load_keyboard_mapping(config):
             print(f"  {action:<18} = {', '.join(physical_keys)}")
     print(f"[keyboard] loaded {len(keyboard_mapping)} key mappings")
 
-def set_keyboard_context(context, text_callback=None):
+def set_keyboard_context(context):
     """
-    context=None : Normal operation with keyboard_mapping.
-    context="text": No conversion via `keyboard_mapping` and no shortcuts are used. The characters are sent to `text_callback`.
+    context=None : Normal keyboard mapping.
+    context="text" : Printable characters are sent directly to process_key().
     """
-    global keyboard_context, keyboard_text_callback
+    global keyboard_context
     keyboard_context = context
-    keyboard_text_callback = text_callback
     if debug:
         print(f"[keyboard] context -> {context}")
-
-def keyboard_send_text(value):
-    """
-    Sends a value to the current text callback.
-    """
-    if keyboard_text_callback is not None:
-        try:
-            keyboard_text_callback(value)
-        except Exception as e:
-            print(f"[keyboard] text callback error: {e}")
 
 def keyboard_handle_event(key, value, code=None):
     """
@@ -467,14 +453,16 @@ def keyboard_handle_event(key, value, code=None):
     # --------------------------------------------------------
     if keyboard_context == "text":
         if key in ("KEY_ESC", "KEY_BACKSPACE"):
-            keyboard_send_text(key)
-            return # not mapped
+            process_key(key, "00", 0.10)
+            return
 
         if key in ("KEY_ENTER", "KEY_KPENTER"):
             pass  # Continue to keyboard_mapping
-        elif translated:
-            keyboard_send_text(translated)
-            return # not mapped
+        elif translated and translated.isprintable():
+            process_key(translated, "00", 0.10)
+            return
+        elif key in KEYBOARD_TEXT_KEY_NAMES:
+            return
 
     # --------------------------------------------------------
     # Mode normal
@@ -666,7 +654,7 @@ def keyboard_listener(config):
                 pass
 
 def lirc_listener(process_key, config):
-    lirc_bouncetime = config.getfloat("lirc", "lirc_bouncetime_s", fallback=0.20)
+    lirc_press_timeout = config.getfloat("remote", "lirc_press_timeout_s", fallback=0.20)
     try:
         proc = subprocess.Popen(
             ["irw"],
@@ -683,8 +671,9 @@ def lirc_listener(process_key, config):
                 parts = line.strip().split()
                 if len(parts) >= 3:
                     key = parts[2].strip().upper()
+                    key = remote_mapping.get(key, key)
                     repeat_code = parts[1].strip()
-                    process_key(key, repeat_code, lirc_bouncetime)
+                    process_key(key, repeat_code, lirc_press_timeout)
     except FileNotFoundError:
         if show_message:
             show_message("error: lirc missing")
@@ -1023,8 +1012,10 @@ def start_inputs(config, process_press, msg_hook=None):
 
     # Load key mapping
     remote_mapping = {}
-    if config.has_section("remote_mapping"):
-        for action, remote_key in config.items("remote_mapping"):
+    if config.has_section("remote"):
+        for action, remote_key in config.items("remote"):
+            if not action.upper().startswith("KEY_"):
+                continue
             action = action.strip().upper()
             remote_key = remote_key.strip().upper()
             if not remote_key or remote_key in ["—", "-", "NONE", "YOUR_REMOTE_KEY"]:
@@ -1034,7 +1025,7 @@ def start_inputs(config, process_press, msg_hook=None):
     if remote_mapping:
         print(f"Loaded {len(remote_mapping)} remote key mappings")
     else:
-        print("No valid remote mappings found, using raw keys")
+        print("No remote mappings found, using default keys")
 
     # Keyboard / evdev
     if config.getboolean("input", "use_keyboard", fallback=False):
