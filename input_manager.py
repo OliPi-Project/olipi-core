@@ -153,11 +153,7 @@ class KeyboardXKB:
             self.compose_state = self.lib.xkb_compose_state_new(
                 self.compose_table, 0
             )
-        print(
-            f"[keyboard] XKB layout={settings['layout']} "
-            f"model={settings['model']} "
-            f"variant={settings['variant'] or '-'}"
-        )
+        print(f"[keyboard] XKB layout={settings['layout']} model={settings['model']} variant={settings['variant'] or '-'}")
 
     def _bind_functions(self):
         lib = self.lib
@@ -447,6 +443,12 @@ def keyboard_handle_event(key, value, code=None):
     # Physical repetitions are ignored.
     if value != 1:
         return
+    # Display translated key name (keep physical names for number keys).
+    display_key = key
+    if key in KEYBOARD_LETTER_KEYS:
+        if translated and len(translated) == 1 and translated.isalpha():
+            display_key = f"KEY_{translated.upper()}"
+    print(f"[keyboard] {display_key}")
 
     # --------------------------------------------------------
     # Mode text
@@ -455,7 +457,6 @@ def keyboard_handle_event(key, value, code=None):
         if key in ("KEY_ESC", "KEY_BACKSPACE"):
             process_key(key, "00", 0.10)
             return
-
         if key in ("KEY_ENTER", "KEY_KPENTER"):
             pass  # Continue to keyboard_mapping
         elif translated and translated.isprintable():
@@ -552,10 +553,7 @@ def keyboard_listener(config):
                         dev.close()
                         continue
                     devices[path] = dev
-                    print(
-                        f"[keyboard] device connected: "
-                        f"{dev.path}: {dev.name}"
-                    )
+                    print(f"[keyboard] device connected: {dev.path}: {dev.name}")
                     # Initial NumLock synchronization.
                     if (not numlock_synced and "KEY_NUMLOCK" in device_keys):
                         led_caps = capabilities.get(ecodes.EV_LED, [])
@@ -608,10 +606,7 @@ def keyboard_listener(config):
                                 1: "PRESS",
                                 2: "REPEAT",
                             }.get(event.value, str(event.value))
-                            print(
-                                f"[keyboard] {dev.name}: "
-                                f"{key} {state}"
-                            )
+                            print(f"[keyboard] {dev.name}: {key} {state}")
                         code = event.code
                         pressed = pressed_by_device.setdefault(dev.path, set())
                         if event.value == 1:
@@ -824,7 +819,7 @@ def mpr121_listener(process_key, config):
 
     time.sleep(0.5)
     if debug:
-        print(f"[mpr121_listener] started @0x{address:02X}")
+        print(f"[mpr121] started @0x{address:02X}")
         print(f"  global touch/release = {global_touch}/{global_release}")
         print("  per-pad config:")
         sensor.update_all()
@@ -837,7 +832,7 @@ def mpr121_listener(process_key, config):
             diff = filt - base
             print(f"   - pad{i}: {key:<15} touch={tth:3d} rel={rth:3d} base={base:4d} filt={filt:4d} diff={diff:+5d}")
     else:
-        print(f"[mpr121_listener] started @0x{address:02X} touch={global_touch} release={global_release}")
+        print(f"[mpr121] started @0x{address:02X} touch={global_touch} release={global_release}")
 
     running = True
     gesture_active = config.getboolean("mpr121", "use_gesture", fallback=False)
@@ -940,7 +935,7 @@ def rotary_listener(pin_a, pin_b, process_key, config=None):
         rotary_bouncetime_ms = 10
 
     if debug:
-        print(f"[rotary_listener] start pins A={pin_a} B={pin_b} divider={divider} invert={invert}")
+        print(f"[rotary] start pins A={pin_a} B={pin_b} divider={divider} invert={invert}")
 
     last_state_a = GPIO.input(pin_a)
     counter = 0
@@ -1023,9 +1018,9 @@ def start_inputs(config, process_press, msg_hook=None):
             remote_mapping[remote_key] = action
 
     if remote_mapping:
-        print(f"Loaded {len(remote_mapping)} remote key mappings")
+        print(f"[Remote] Loaded {len(remote_mapping)} remote key mappings")
     else:
-        print("No remote mappings found, using default keys")
+        print("[Remote] No remote mappings found, using default keys")
 
     # Keyboard / evdev
     if config.getboolean("input", "use_keyboard", fallback=False):
