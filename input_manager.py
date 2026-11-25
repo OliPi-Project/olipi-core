@@ -454,7 +454,7 @@ def keyboard_handle_event(key, value, code=None):
     # Mode text
     # --------------------------------------------------------
     if keyboard_context == "text":
-        if key in ("KEY_ESC", "KEY_BACKSPACE"):
+        if key in ("KEY_ESC", "KEY_BACKSPACE", "KEY_DELETE"):
             process_key(key, "00", 0.10)
             return
         if key in ("KEY_ENTER", "KEY_KPENTER"):
