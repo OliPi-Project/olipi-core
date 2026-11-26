@@ -65,17 +65,17 @@ def get_font(path, base_size):
     return screen.ImageFont.truetype(str(path), size)
 
 if height < 64:
-    font_title_menu = get_font("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 10)
-    font_item_menu = get_font("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 11)
-    font_message = get_font("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 10)
-    font_text_input = get_font("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 12)
-    font_text_info = get_font("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 10)
+    font_title_menu = get_font("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", get_config("other_fonts", "font_title_menu", fallback=10, type=int))
+    font_item_menu = get_font("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", get_config("other_fonts", "font_item_menu", fallback=11, type=int))
+    font_message = get_font("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", get_config("other_fonts", "font_message", fallback=10, type=int))
+    font_text_input = get_font("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", get_config("other_fonts", "font_text_input", fallback=12, type=int))
+    font_input_info = get_font("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", get_config("other_fonts", "font_input_info", fallback=10, type=int))
 else:
-    font_title_menu = get_font("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 10)
-    font_item_menu = get_font("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 11)
-    font_message = get_font("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 11)
-    font_text_input = get_font("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 12)
-    font_text_info = get_font("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 10)
+    font_title_menu = get_font("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", get_config("other_fonts", "font_title_menu", fallback=10, type=int))
+    font_item_menu = get_font("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", get_config("other_fonts", "font_item_menu", fallback=11, type=int))
+    font_message = get_font("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", get_config("other_fonts", "font_message", fallback=11, type=int))
+    font_text_input = get_font("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", get_config("other_fonts", "font_text_input", fallback=12, type=int))
+    font_input_info = get_font("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", get_config("other_fonts", "font_input_info", fallback=10, type=int))
 
 def get_rpi_model():
     model_path = Path("/proc/device-tree/model")
@@ -295,7 +295,7 @@ def handle_text_input(key, text, cursor, final_code=0):
         if key == "KEY_LEFT":
             return text, cursor, "left_long"
         return text, cursor, None
-        
+
     # Short press
     if key == "KEY_BACKSPACE":
         if cursor > 0:
@@ -380,7 +380,7 @@ def draw_text_input(title, text, cursor, info_lines=None):
     draw.line((cursor_x, cursor_y, cursor_x, cursor_y + font_text_input.getbbox("A")[3]), fill=COLOR_INPUT_CURSOR)
     # --- Information lines ---
     if info_lines:
-        info_bbox = font_text_info.getbbox("Ay")
+        info_bbox = font_input_info.getbbox("Ay")
         line_height = info_bbox[3] - info_bbox[1]
         max_width = width - 2 * padding_x
         wrapped_lines = []
@@ -389,7 +389,7 @@ def draw_text_input(title, text, cursor, info_lines=None):
             current_line = ""
             for word in words:
                 test_line = current_line + (" " if current_line else "") + word
-                if draw.textlength(test_line, font=font_text_info) > max_width:
+                if draw.textlength(test_line, font=font_input_info) > max_width:
                     if current_line:
                         wrapped_lines.append(current_line)
                     current_line = word
@@ -401,7 +401,7 @@ def draw_text_input(title, text, cursor, info_lines=None):
         wrapped_lines = wrapped_lines[:max_lines]
         for i, line in enumerate(wrapped_lines):
             y = height - max_lines * line_height + i * line_height
-            draw.text((padding_x, y), line, font=font_text_info, fill=COLOR_INPUT_INFO)
+            draw.text((padding_x, y), line, font=font_input_info, fill=COLOR_INPUT_INFO)
 
 def draw_custom_menu(options, selection, title="Menu", multi=None, checkmark="✓ "):
     """Full-width menu, spacing/scroll dynamic, fixed line height, selection rectangle aligned to text."""
