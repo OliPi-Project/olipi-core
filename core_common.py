@@ -246,7 +246,6 @@ def get_theme_menu():
 # --------------------------------------------------------
 # Text input
 # --------------------------------------------------------
-
 valid_chars = string.ascii_lowercase + '-' + string.digits + " '"
 accent_variants = {
     "a": ["a", "à", "â", "ä"],
@@ -260,10 +259,8 @@ accent_variants = {
 def handle_text_input(key, text, cursor, final_code=0):
     """
     Handle common text input controls.
-
     Returns:
         text, cursor, action
-
     action:
         None          : Continue editing.
         "confirm"     : Confirm input.
@@ -271,65 +268,46 @@ def handle_text_input(key, text, cursor, final_code=0):
         "ok_long"     : Long OK press.
         "left_long"   : Long LEFT press.
     """
-
-    # ----------------------------------------------------
     # Long press
-    # ----------------------------------------------------
     if final_code >= 4:
-
         # Accent switching
         if key in ("KEY_UP", "KEY_DOWN"):
             if 0 <= cursor < len(text):
                 char = text[cursor].lower()
-
                 for variants in accent_variants.values():
                     if char in variants:
                         current_index = variants.index(char)
-
                         if key == "KEY_UP":
                             next_index = (current_index + 1) % len(variants)
                         else:
                             next_index = (current_index - 1) % len(variants)
-
                         new_char = variants[next_index]
-
                         text = (
                             text[:cursor]
                             + new_char
                             + text[cursor + 1:]
                         )
-
                         print(f"→ Accent switch: {char} -> {new_char}")
                         break
-
             return text, cursor, None
-
         # Long OK
         if key == "KEY_OK":
             return text, cursor, "ok_long"
-
         # Long LEFT
         if key == "KEY_LEFT":
             return text, cursor, "left_long"
-
         return text, cursor, None
 
-    # ----------------------------------------------------
     # Short press
-    # ----------------------------------------------------
-
     if key == "KEY_BACKSPACE":
         if cursor > 0:
             text = text[:cursor - 1] + text[cursor:]
             cursor -= 1
-
     elif key == "KEY_ESC":
         return text, cursor, "cancel"
-
     elif key == "KEY_LEFT":
         if cursor > 0:
             cursor -= 1
-
     elif key == "KEY_RIGHT":
         if cursor < len(text) - 1:
             cursor += 1
@@ -340,7 +318,6 @@ def handle_text_input(key, text, cursor, final_code=0):
             else:
                 text += " "
             cursor += 1
-
     elif key == "KEY_UP":
         if not text:
             text = "1"
@@ -349,7 +326,6 @@ def handle_text_input(key, text, cursor, final_code=0):
             if char in valid_chars:
                 index = (valid_chars.index(char) + 1) % len(valid_chars)
                 text = text[:cursor] + valid_chars[index] + text[cursor + 1:]
-
     elif key == "KEY_DOWN":
         if not text:
             text = "a"
@@ -358,121 +334,76 @@ def handle_text_input(key, text, cursor, final_code=0):
             if char in valid_chars:
                 index = (valid_chars.index(char) - 1) % len(valid_chars)
                 text = text[:cursor] + valid_chars[index] + text[cursor + 1:]
-
     elif key == "KEY_CHANNELUP":
         text = text[:cursor] + " " + text[cursor:]
-
     elif key in ("KEY_DELETE", "KEY_CHANNELDOWN"):
         if cursor < len(text):
             text = text[:cursor] + text[cursor + 1:]
         cursor = min(cursor, len(text))
-
     elif key == "KEY_OK":
         return text, cursor, "confirm"
-
     elif isinstance(key, str) and key.isprintable():
         text = text[:cursor] + key + text[cursor:]
         cursor += len(key)
-
     return text, cursor, None
 
 def draw_text_input(title, text, cursor, info_lines=None):
     draw.rectangle((0, 0, width, height), fill=COLOR_BG)
-
     padding_x = max(1, int(width * 0.02))
-
     if height <= 64:
         spacing_title_items = 2
         padding_y = 1
     else:
         spacing_title_items = 10
         padding_y = 6
-
     # --- Title ---
     title_width = draw.textlength(title, font=font_title_menu)
     x_title = (width - title_width) // 2
-    draw.text((x_title, padding_y), title,
-              font=font_title_menu, fill=COLOR_TITLE)
-
+    draw.text((x_title, padding_y), title, font=font_title_menu, fill=COLOR_TITLE)
     # --- Input box ---
     input_y = padding_y + font_title_menu.getbbox("Ay")[3] + spacing_title_items
     input_padding_x = 4
     input_padding_y = 3
-
     bbox = font_text_input.getbbox("Ay")
     input_h = bbox[3] - bbox[1] + 2 * input_padding_y
     input_bottom = input_y + input_h
-
-    draw.rectangle((0, input_y, width, input_bottom),
-                   fill=COLOR_INPUT_BG)
-
+    draw.rectangle((0, input_y, width, input_bottom), fill=COLOR_INPUT_BG)
     # --- Horizontal scroll ---
     text_before_cursor = text[:cursor]
-    text_width_before_cursor = draw.textlength(
-        text_before_cursor, font=font_text_input
-    )
-
+    text_width_before_cursor = draw.textlength(text_before_cursor, font=font_text_input)
     visible_width = width - 2 * input_padding_x
     scroll_offset = 0
-
     if text_width_before_cursor > visible_width:
         scroll_offset = text_width_before_cursor - visible_width + 10
-
-    draw.text(
-        (input_padding_x - scroll_offset, input_y + input_padding_y),
-        text,
-        font=font_text_input,
-        fill=COLOR_INPUT_TEXT
-    )
-
+    draw.text((input_padding_x - scroll_offset, input_y + input_padding_y), text, font=font_text_input, fill=COLOR_INPUT_TEXT)
     # --- Cursor ---
-    cursor_x = (
-        text_width_before_cursor - scroll_offset + input_padding_x
-    )
+    cursor_x = (text_width_before_cursor - scroll_offset + input_padding_x)
     cursor_y = input_y + input_padding_y
-
-    draw.line(
-        (cursor_x, cursor_y, cursor_x,
-         cursor_y + font_text_input.getbbox("A")[3]),
-        fill=COLOR_INPUT_CURSOR
-    )
-
+    draw.line((cursor_x, cursor_y, cursor_x, cursor_y + font_text_input.getbbox("A")[3]), fill=COLOR_INPUT_CURSOR)
     # --- Information lines ---
     if info_lines:
         info_bbox = font_text_info.getbbox("Ay")
         line_height = info_bbox[3] - info_bbox[1]
-
         max_width = width - 2 * padding_x
         wrapped_lines = []
-
         for info in info_lines:
             words = info.split()
             current_line = ""
-
             for word in words:
                 test_line = current_line + (" " if current_line else "") + word
-
                 if draw.textlength(test_line, font=font_text_info) > max_width:
                     if current_line:
                         wrapped_lines.append(current_line)
                     current_line = word
                 else:
                     current_line = test_line
-
             if current_line:
                 wrapped_lines.append(current_line)
-
         max_lines = 3
         wrapped_lines = wrapped_lines[:max_lines]
-
         for i, line in enumerate(wrapped_lines):
             y = height - max_lines * line_height + i * line_height
-            draw.text(
-                (padding_x, y),
-                line,
-                font=font_text_info,
-                fill=COLOR_INPUT_INFO
-            )
+            draw.text((padding_x, y), line, font=font_text_info, fill=COLOR_INPUT_INFO)
 
 def draw_custom_menu(options, selection, title="Menu", multi=None, checkmark="✓ "):
     """Full-width menu, spacing/scroll dynamic, fixed line height, selection rectangle aligned to text."""
