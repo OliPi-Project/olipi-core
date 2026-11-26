@@ -290,14 +290,12 @@ def handle_text_input(key, text, cursor, final_code=0):
                         print(f"→ Accent switch: {char} -> {new_char}")
                         break
             return text, cursor, None
-        # Long OK
         if key == "KEY_OK":
             return text, cursor, "ok_long"
-        # Long LEFT
         if key == "KEY_LEFT":
             return text, cursor, "left_long"
         return text, cursor, None
-
+        
     # Short press
     if key == "KEY_BACKSPACE":
         if cursor > 0:
