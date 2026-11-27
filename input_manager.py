@@ -510,11 +510,36 @@ def keyboard_listener(config):
     # Devices to ignore.
     ignored_devices = ("gpio", "vc4-hdmi")
     devices = {}
+    keyboard_grabbed = True
     numlock_synced = False
     # Keys held down by device.
     pressed_by_device = {}
     # Number of devices that support each EV_KEY code.
     pressed_counts = {}
+
+    def release_all_pressed():
+        """Releases all keys currently held by all devices."""
+        for path in list(pressed_by_device):
+            dev = devices.get(path)
+            if dev is not None:
+                release_device(dev)
+
+    def toggle_keyboard_grab():
+        nonlocal keyboard_grabbed
+        keyboard_grabbed = not keyboard_grabbed
+        if not keyboard_grabbed:
+            release_all_pressed()
+        for dev in devices.values():
+            try:
+                if keyboard_grabbed:
+                    dev.grab()
+                else:
+                    dev.ungrab()
+            except OSError as e:
+                if debug:
+                    print(f"[keyboard] grab change failed for {dev.path}: {e}")
+        if debug:
+            print(f"[keyboard] grab -> {'ON' if keyboard_grabbed else 'OFF'}")
 
     def release_device(dev):
         """Releases any keys still held down by a device."""
@@ -554,6 +579,11 @@ def keyboard_listener(config):
                         continue
                     devices[path] = dev
                     print(f"[keyboard] device connected: {dev.path}: {dev.name}")
+                    if keyboard_grabbed:
+                        try:
+                            dev.grab()
+                        except OSError as e:
+                            print(f"[keyboard] cannot grab {dev.path}: {e}")
                     # Initial NumLock synchronization.
                     if (not numlock_synced and "KEY_NUMLOCK" in device_keys):
                         led_caps = capabilities.get(ecodes.EV_LED, [])
@@ -600,6 +630,12 @@ def keyboard_listener(config):
                         if event.type != ecodes.EV_KEY:
                             continue
                         key = get_keyboard_key_name(event.code)
+                        if key == "KEY_F12":
+                            if event.value == 1:
+                                toggle_keyboard_grab()
+                            continue
+                        if not keyboard_grabbed:
+                            continue
                         if debug:
                             state = {
                                 0: "RELEASE",
@@ -644,6 +680,10 @@ def keyboard_listener(config):
         for dev in devices.values():
             try:
                 release_device(dev)
+                try:
+                    dev.ungrab()
+                except OSError:
+                    pass
                 dev.close()
             except Exception:
                 pass
