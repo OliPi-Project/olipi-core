@@ -36,17 +36,17 @@ DISPLAY_FORMAT = get_config("screen", "display_format", fallback="RGB", type=str
 INVERT = get_config("screen", "invert", fallback=False, type=bool)
 DIAG_INCH = get_config("screen", "diag", fallback=17.5, type=float)
 
-# --- Physical screen size ---
-PHYSICAL_WIDTH = get_config("screen", "width", fallback=800, type=int)
-PHYSICAL_HEIGHT = get_config("screen", "height", fallback=400, type=int)
+# --- UI screen size ---
+UI_WIDTH = get_config("screen", "width", fallback=800, type=int)
+UI_HEIGHT = get_config("screen", "height", fallback=400, type=int)
 
 # Rotation already gérée
 if ROTATION in (90, 270):
-    width = PHYSICAL_HEIGHT
-    height = PHYSICAL_WIDTH
+    width = UI_HEIGHT
+    height = UI_WIDTH
 else:
-    width = PHYSICAL_WIDTH
-    height = PHYSICAL_HEIGHT
+    width = UI_WIDTH
+    height = UI_HEIGHT
 
 # Offsets pour centrer horizontalement et verticalement
 X_OFFSET = (FB_WIDTH - width) // 2
