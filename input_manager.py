@@ -254,6 +254,7 @@ class KeyboardXKB:
             0, 0, 0         # layouts
         )
         print(f"[keyboard] NumLock={'ON' if enabled else 'OFF'}")
+        show_message(f"NumLock {'ON' if enabled else 'OFF'}")
 
     def reset_compose(self):
         """Cancels any composition currently in progress."""
@@ -540,6 +541,7 @@ def keyboard_listener(config):
                     print(f"[keyboard] grab change failed for {dev.path}: {e}")
         if debug:
             print(f"[keyboard] grab -> {'ON' if keyboard_grabbed else 'OFF'}")
+            show_message(f"grab -> {'ON' if keyboard_grabbed else 'OFF'}")
 
     def release_device(dev):
         """Releases any keys still held down by a device."""
@@ -579,11 +581,13 @@ def keyboard_listener(config):
                         continue
                     devices[path] = dev
                     print(f"[keyboard] device connected: {dev.path}: {dev.name}")
+                    show_message("Device connected")
                     if keyboard_grabbed:
                         try:
                             dev.grab()
                         except OSError as e:
                             print(f"[keyboard] cannot grab {dev.path}: {e}")
+                            show_message("Device cannot grab")
                     # Initial NumLock synchronization.
                     if (not numlock_synced and "KEY_NUMLOCK" in device_keys):
                         led_caps = capabilities.get(ecodes.EV_LED, [])
@@ -614,6 +618,7 @@ def keyboard_listener(config):
                         os.fstat(dev.fd)
                     except OSError:
                         print(f"[keyboard] device disconnected: {dev.path}")
+                        show_message("Device disconnected")
                         release_device(dev)
                         devices.pop(dev.path, None)
                         try:
@@ -666,6 +671,7 @@ def keyboard_listener(config):
                     continue
                 except OSError:
                     print(f"[keyboard] device disconnected: {dev.path}")
+                    show_message("Device disconnected")
                     release_device(dev)
                     devices.pop(dev.path, None)
                     try:
