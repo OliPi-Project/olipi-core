@@ -347,7 +347,7 @@ def handle_text_input(key, text, cursor, final_code=0):
 
 def draw_text_input(title, text, cursor, info_lines=None):
     draw.rectangle((0, 0, width, height), fill=COLOR_BG)
-    padding_x = max(1, int(width * 0.02))
+    padding_x = max(1, int(width * 0.02)) if height > 64 else 0
     if height <= 64:
         spacing_title_items = 2
         padding_y = 1
@@ -355,11 +355,12 @@ def draw_text_input(title, text, cursor, info_lines=None):
         spacing_title_items = 10
         padding_y = 6
     # --- Title ---
-    title_width = draw.textlength(title, font=font_title_menu)
-    x_title = (width - title_width) // 2
-    draw.text((x_title, padding_y), title, font=font_title_menu, fill=COLOR_TITLE)
+    if height > 32:
+        title_width = draw.textlength(title, font=font_title_menu)
+        x_title = (width - title_width) // 2
+        draw.text((x_title, padding_y), title, font=font_title_menu, fill=COLOR_TITLE)
     # --- Input box ---
-    input_y = padding_y + font_title_menu.getbbox("Ay")[3] + spacing_title_items
+    input_y = padding_y + font_title_menu.getbbox("Ay")[3] + spacing_title_items if height > 32 else 0
     input_padding_x = 4
     input_padding_y = 3
     bbox = font_text_input.getbbox("Ay")
@@ -397,7 +398,7 @@ def draw_text_input(title, text, cursor, info_lines=None):
                     current_line = test_line
             if current_line:
                 wrapped_lines.append(current_line)
-        max_lines = 3
+        max_lines = 3 if height > 32 else 1
         wrapped_lines = wrapped_lines[:max_lines]
         for i, line in enumerate(wrapped_lines):
             y = height - max_lines * line_height + i * line_height
