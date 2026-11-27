@@ -4,6 +4,7 @@
 
 # screens/ST7789V.py
 
+import time
 import os
 import subprocess
 from pathlib import Path
@@ -58,6 +59,14 @@ image = Image.new("RGB", (width, height))
 draw = ImageDraw.Draw(image)
 
 WRITE_BLOCK_ROWS = 1
+
+PERF_DEBUG = True
+_perf_count = 0
+_perf_total = 0.0
+_perf_rotate = 0.0
+_perf_resize = 0.0
+_perf_convert = 0.0
+_perf_write = 0.0
 
 # reusable buffers (module-level)
 _rgb565_buf = None  # will be a bytearray sized >= w*h*2
@@ -117,70 +126,115 @@ def _convert_image_to_rgb565_into_buf(buf_img):
     return memoryview(_rgb565_buf)[: w * h * 2]
 
 def refresh(img: Image.Image = None):
-    """
-    Optimized partial refresh for small TFT:
-     - rotate the logical image first (so rotation is preserved)
-     - optionally invert colors if requested via config
-     - scale down if necessary
-     - convert only the rotated logical image to RGB565 (into reuse buffer)
-     - write blocks of rows into /dev/fbN using os.lseek + os.write
-    """
+    global _perf_count, _perf_total
+    global _perf_rotate, _perf_resize, _perf_convert, _perf_write
+
+    perf_start = time.perf_counter() if PERF_DEBUG else 0
+
     buf_img = img if img is not None else image
 
-    # apply rotation first so offsets/size reflect rotated image
+    # Rotation
+    t = time.perf_counter() if PERF_DEBUG else 0
+
     if ROTATION != 0:
         buf_img = buf_img.rotate(ROTATION, expand=True)
 
+    if PERF_DEBUG:
+        _perf_rotate += time.perf_counter() - t
+
     w, h = buf_img.size
 
-    # ensure the logical image fits into the framebuffer
+    # Resize if necessary
     if w > FB_WIDTH or h > FB_HEIGHT:
+        t = time.perf_counter()
+
         scale = min(FB_WIDTH / w, FB_HEIGHT / h)
         new_w = max(1, int(w * scale))
         new_h = max(1, int(h * scale))
         buf_img = buf_img.resize((new_w, new_h), Image.NEAREST)
         w, h = buf_img.size
 
-    # compute centered offsets (works for rotated sizes too)
+        if PERF_DEBUG:
+            _perf_resize += time.perf_counter() - t
+
     x_off = (FB_WIDTH - w) // 2
     y_off = (FB_HEIGHT - h) // 2
 
-    # convert logical region to rgb565 into shared buffer
-    rgb565_mv = _convert_image_to_rgb565_into_buf(buf_img)  # memoryview on bytes
+    # RGB565 conversion
+    t = time.perf_counter()
+
+    rgb565_mv = _convert_image_to_rgb565_into_buf(buf_img)
+
+    if PERF_DEBUG:
+        _perf_convert += time.perf_counter() - t
 
     line_bytes = w * 2
     fb_line_bytes = FB_WIDTH * 2
 
-    # open FD once and write in blocks of WRITE_BLOCK_ROWS
+    # Framebuffer write
+    t = time.perf_counter()
+
     try:
         fd = os.open(FB_DEVICE, os.O_WRONLY)
         try:
             start = 0
+
             for row in range(0, h, WRITE_BLOCK_ROWS):
                 block_rows = min(WRITE_BLOCK_ROWS, h - row)
                 block_bytes = block_rows * line_bytes
                 fb_offset = ((y_off + row) * FB_WIDTH + x_off) * 2
+
                 os.lseek(fd, fb_offset, os.SEEK_SET)
 
                 mv = rgb565_mv[start:start + block_bytes]
-                # ensure full write (loop in case of partial writes)
+
                 written = 0
-                # memoryview supports slicing into bytes
                 while written < len(mv):
                     wlen = os.write(fd, mv[written:])
                     if wlen == 0:
                         raise OSError("fb write returned 0")
                     written += wlen
+
                 start += block_bytes
+
         finally:
             os.close(fd)
+
     except PermissionError:
         raise PermissionError(f"need root or write perm for {FB_DEVICE}")
+
     except OSError as e:
-        try:
-            print("refresh write error:", e)
-        except Exception:
-            pass
+        print("refresh write error:", e)
+
+    if PERF_DEBUG:
+        _perf_write += time.perf_counter() - t
+
+        _perf_count += 1
+        _perf_total += time.perf_counter() - perf_start
+
+        if _perf_count >= 100:
+            n = _perf_count
+
+            avg_total = _perf_total / n
+            perf_total = time.perf_counter() - perf_start
+
+            print(
+                f"ST7789 PERF ({w}x{h}, FB {FB_WIDTH}x{FB_HEIGHT}) | "
+                f"total={avg_total * 1000:.2f} ms "
+                f"rotate={_perf_rotate / n * 1000:.2f} ms "
+                f"resize={_perf_resize / n * 1000:.2f} ms "
+                f"convert={_perf_convert / n * 1000:.2f} ms "
+                f"write={_perf_write / n * 1000:.2f} ms "
+                f"FPS={1 / avg_total:.1f} "
+                f"perf_total={perf_total * 1000:.2f} ms "
+            )
+
+            _perf_count = 0
+            _perf_total = 0.0
+            _perf_rotate = 0.0
+            _perf_resize = 0.0
+            _perf_convert = 0.0
+            _perf_write = 0.0
 
 def clear_display():
     draw.rectangle((0, 0, width, height), fill=(0, 0, 0))

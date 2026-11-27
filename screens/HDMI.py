@@ -2,6 +2,7 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright 2026 OliPi Project
 
+import time
 import os
 import subprocess
 from pathlib import Path
@@ -36,6 +37,14 @@ DISPLAY_FORMAT = get_config("screen", "display_format", fallback="RGB", type=str
 INVERT = get_config("screen", "invert", fallback=False, type=bool)
 DIAG_INCH = get_config("screen", "diag", fallback=17.5, type=float)
 
+PERF_DEBUG = True
+_perf_count = 0
+_perf_total = 0.0
+_perf_rotate = 0.0
+_perf_resize = 0.0
+_perf_convert = 0.0
+_perf_write = 0.0
+
 # --- UI screen size ---
 UI_WIDTH = get_config("screen", "width", fallback=800, type=int)
 UI_HEIGHT = get_config("screen", "height", fallback=400, type=int)
@@ -48,76 +57,98 @@ else:
     width = UI_WIDTH
     height = UI_HEIGHT
 
-# Offsets pour centrer horizontalement et verticalement
+# Offsets for horizontal and vertical centering
 X_OFFSET = (FB_WIDTH - width) // 2
 Y_OFFSET = (FB_HEIGHT - height) // 2
 
-# Image PIL logique
+# Logical PIL Image
 image = Image.new("RGB", (width, height))
 draw = ImageDraw.Draw(image)
 
+# reusable buffers (module-level)
+_rgb565_buf = None # will be a bytearray sized >= w*h*2
+
+def _ensure_rgb565_buf(size):
+    global _rgb565_buf
+    if _rgb565_buf is None or len(_rgb565_buf) < size:
+        _rgb565_buf = bytearray(size)
+
 # ---- Helpers: convert PIL -> framebuffer bytes (RGB565) ----
 def _rgb_to_rgb565_bytes_numpy(img):
-    arr = _np.asarray(img.convert("RGB"), dtype=_np.uint16)
-    r = (arr[:, :, 0] & 0xF8).astype(_np.uint16)
-    g = (arr[:, :, 1] & 0xFC).astype(_np.uint16)
-    b = (arr[:, :, 2] >> 3).astype(_np.uint16)
-    color = (r << 8) | (g << 3) | b
-    lo = color & 0xFF
-    hi = (color >> 8) & 0xFF
-    packed = _np.dstack((lo, hi)).astype(_np.uint8)
-    return packed.flatten().tobytes()
+    w, h = img.size
+    size = w * h * 2
+    _ensure_rgb565_buf(size)
+    # Direct Access to RGB Pixels
+    raw = img.tobytes("raw", "RGB")
+    arr = _np.frombuffer(raw, dtype=_np.uint8).reshape((h, w, 3))
+    # RGB565 Conversion
+    rgb565 = _np.frombuffer(_rgb565_buf, dtype=_np.uint16, count=w * h)
+    r = arr[:, :, 0].astype(_np.uint16)
+    g = arr[:, :, 1].astype(_np.uint16)
+    b = arr[:, :, 2].astype(_np.uint16)
+    rgb565[:] = (
+        ((r & 0xF8) << 8) |
+        ((g & 0xFC) << 3) |
+        (b >> 3)
+    ).reshape(-1)
+    return memoryview(_rgb565_buf)[:size]
 
 def refresh(img: Image.Image = None):
-    """
-    Partial write refresh:
-    - rotate the logical image first (so rotation is preserved)
-    - convert only the rotated logical image to RGB565
-    - write only the rectangle centered in the framebuffer (line by line)
-    """
+    global _perf_count, _perf_total
+    global _perf_rotate, _perf_resize, _perf_convert, _perf_write
+
+    perf_start = time.perf_counter() if PERF_DEBUG else 0
+
     buf_img = img if img is not None else image
 
     # Apply rotation first so offsets/size reflect rotated image
+    t = time.perf_counter() if PERF_DEBUG else 0
+
     if ROTATION != 0:
-        # expand=True ensures rotated image has correct dimensions
         buf_img = buf_img.rotate(ROTATION, expand=True)
+
+    if PERF_DEBUG:
+        _perf_rotate += time.perf_counter() - t
 
     w, h = buf_img.size
 
     # Ensure the logical image fits into the framebuffer
     if w > FB_WIDTH or h > FB_HEIGHT:
-        # optional: scale down to fit (nearest neighbour to keep pixel look)
+        t = time.perf_counter()
+
         scale = min(FB_WIDTH / w, FB_HEIGHT / h)
         new_w = max(1, int(w * scale))
         new_h = max(1, int(h * scale))
         buf_img = buf_img.resize((new_w, new_h), Image.NEAREST)
         w, h = buf_img.size
 
+        _perf_resize += time.perf_counter() - t
+
     # Center the image on the FB
     x_off = (FB_WIDTH - w) // 2
     y_off = (FB_HEIGHT - h) // 2
 
     # Convert only the logical (rotated) image to RGB565 bytes
-    rgb565 = _rgb_to_rgb565_bytes_numpy(buf_img)  # length == w*h*2
+    t = time.perf_counter()
+    rgb565 = _rgb_to_rgb565_bytes_numpy(buf_img)
+    if PERF_DEBUG:
+        _perf_convert += time.perf_counter() - t
 
-    # Strides (bytes per line)
-    fb_line_bytes = FB_WIDTH * 2       # framebuffer line stride (bytes)
-    img_line_bytes = w * 2             # image line stride (bytes)
+    fb_line_bytes = FB_WIDTH * 2
+    img_line_bytes = w * 2
+
+    t = time.perf_counter()
 
     try:
         fd = os.open(FB_DEVICE, os.O_WRONLY)
         try:
-            # Write row by row (avoid building full-FB buffer)
-            # We can write each row in one os.write to reduce seeks.
             start = 0
             for row in range(h):
-                # compute offset in bytes inside fb for this row
                 fb_offset = ((y_off + row) * FB_WIDTH + x_off) * 2
                 os.lseek(fd, fb_offset, os.SEEK_SET)
 
                 row_start = start
                 row_end = row_start + img_line_bytes
-                # using memoryview avoids making copies
                 mv = memoryview(rgb565)[row_start:row_end]
                 os.write(fd, mv)
                 start = row_end
@@ -126,10 +157,37 @@ def refresh(img: Image.Image = None):
     except PermissionError:
         raise PermissionError(f"need root or write perm for {FB_DEVICE}")
     except OSError as e:
-        # catch partial writes / busy device
-        if core.DEBUG:
-            print("refresh write error:", e)
+        print("refresh write error:", e)
 
+    if PERF_DEBUG:
+        _perf_write += time.perf_counter() - t
+
+        _perf_count += 1
+        _perf_total += time.perf_counter() - perf_start
+
+        if _perf_count >= 100:
+            n = _perf_count
+            avg_total = _perf_total / n
+            perf_total = time.perf_counter() - perf_start
+
+            print(
+                f"HDMI PERF ({w}x{h}, FB {FB_WIDTH}x{FB_HEIGHT}) | "
+                f"avg_total={avg_total * 1000:.2f} ms "
+                f"rotate={_perf_rotate / n * 1000:.2f} ms "
+                f"resize={_perf_resize / n * 1000:.2f} ms "
+                f"convert={_perf_convert / n * 1000:.2f} ms "
+                f"write={_perf_write / n * 1000:.2f} ms "
+                f"FPS={1 / avg_total:.1f} "
+                f"perf_total={perf_total * 1000:.2f} ms "
+            )
+
+            _perf_count = 0
+            _perf_total = 0.0
+            _perf_rotate = 0.0
+            _perf_resize = 0.0
+            _perf_convert = 0.0
+            _perf_write = 0.0
+            
 def clear_display():
     draw.rectangle((0, 0, FB_WIDTH, FB_HEIGHT), fill=(0, 0, 0))
     refresh()
